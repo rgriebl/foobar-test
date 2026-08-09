@@ -452,6 +452,10 @@ Core::~Core()
 #if !defined(BS_BACKEND)
     m_priceGuideCache->clearCache();
     m_pictureCache->clearCache();
+    // their destructors stop and join the load/save threads, which still
+    // access core() and the database
+    m_priceGuideCache.reset();
+    m_pictureCache.reset();
 #endif
     s_inst = nullptr;
 }
