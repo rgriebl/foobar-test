@@ -578,10 +578,12 @@ QCoro::Task<bool> Application::closeAllDocuments()
 
 Application::~Application()
 {
-    delete AppStatistics::inst();
     delete CheckForUpdates::inst();
     delete BrickLink::core();
     delete LDraw::library();
+    // the cache worker threads report into AppStatistics while draining their queues, and inst()
+    // would recreate the singleton from the wrong thread: destroy it after everything using it
+    delete AppStatistics::inst();
     delete SystemInfo::inst();
     delete Currency::inst();
 //    delete DocumentList::inst();
