@@ -23,17 +23,19 @@ class QmlRenderGeometry : public QQuick3DGeometry
     Q_OBJECT
     QML_NAMED_ELEMENT(RenderGeometry)
     QML_UNCREATABLE("")
-    Q_PROPERTY(QColor color READ color CONSTANT FINAL)
-    Q_PROPERTY(float luminance READ luminance CONSTANT FINAL)
-    Q_PROPERTY(bool isChrome READ isChrome CONSTANT FINAL)
-    Q_PROPERTY(bool isMetallic READ isMetallic CONSTANT FINAL)
-    Q_PROPERTY(bool isPearl READ isPearl CONSTANT FINAL)
-    Q_PROPERTY(QQuick3DTextureData *textureData READ textureData CONSTANT FINAL)
+    Q_PROPERTY(QColor color READ color NOTIFY colorChanged FINAL)
+    Q_PROPERTY(float luminance READ luminance NOTIFY colorChanged FINAL)
+    Q_PROPERTY(bool isChrome READ isChrome NOTIFY colorChanged FINAL)
+    Q_PROPERTY(bool isMetallic READ isMetallic NOTIFY colorChanged FINAL)
+    Q_PROPERTY(bool isPearl READ isPearl NOTIFY colorChanged FINAL)
+    Q_PROPERTY(QQuick3DTextureData *textureData READ textureData NOTIFY colorChanged FINAL)
     Q_PROPERTY(QVector3D center READ center CONSTANT FINAL)
     Q_PROPERTY(float radius READ radius CONSTANT FINAL)
 
 public:
-    QmlRenderGeometry(const BrickLink::Color *color);
+    // a surface built from LDraw color 16 inherits the model color: it is re-colored via
+    // setModelColor() instead of rebuilding the geometry
+    QmlRenderGeometry(const BrickLink::Color *color, bool inheritsModelColor);
 
     QColor color() const        { return m_color->ldrawColor(); }
     float luminance() const     { return m_color->luminance(); }
@@ -47,11 +49,19 @@ public:
     float radius() const                         { return m_radius; }
     void setRadius(float radius)                 { m_radius = radius; }
 
+    bool inheritsModelColor() const              { return m_inheritsModelColor; }
+    // takes ownership of textureData (may be nullptr) and deletes the old one
+    void setModelColor(const BrickLink::Color *color, QQuick3DTextureData *textureData);
+
+signals:
+    void colorChanged();
+
 private:
     const BrickLink::Color *m_color;
     QQuick3DTextureData *m_texture = nullptr;
     QVector3D m_center;
     float m_radius = 0;
+    bool m_inheritsModelColor = false;
 };
 
 class QmlRenderLineInstancing : public QQuick3DInstancing
@@ -65,6 +75,8 @@ public:
     void clear();
     void setBuffer(const QByteArray &ba);
 
+    // an invalid color c means "the model's edge color": the line is flagged in the instance
+    // table and the customEdgeColor uniform is substituted in the line shader
     static void addLineToBuffer(QByteArray &buffer, const QColor &c, const QVector3D &p0,
                                 const QVector3D &p1);
     static void addConditionalLineToBuffer(QByteArray &buffer, const QColor &c, const QVector3D &p0,

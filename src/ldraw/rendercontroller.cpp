@@ -31,6 +31,13 @@ static bool isTexturedColor(const BrickLink::Color *color)
     return color && (color->hasParticles() || (color->id() == 0));
 }
 
+// color 16 buffers (nullptr) always carry UVs: any textured color can become the model color
+// later without a geometry rebuild
+static bool needsUV(const BrickLink::Color *color)
+{
+    return !color || isTexturedColor(color);
+}
+
 
 RenderController::RenderController(QObject *parent)
     : QObject(parent)
@@ -139,10 +146,21 @@ void RenderController::setItemAndColor(const BrickLink::Item *item, const BrickL
     if ((item == m_item) && (!item || (color == m_color)))
         return;
 
+    if (color != m_color) {
+        m_color = color;
+        emit edgeColorChanged(edgeColor());
+    }
+
+    // color-only change: the geometry is color-independent, just update the materials
+    if ((item == m_item) && m_part) {
+        updateSurfaceColors();
+        emit itemOrColorChanged();
+        return;
+    }
+
     // new item
-    auto oldPart = std::move(m_part); // do not release immediately, as it might be re-used on color change
+    m_part.reset();
     m_item = item;
-    m_color = color;
 
     emit canRenderChanged(canRender());
 
@@ -157,8 +175,8 @@ void RenderController::setItemAndColor(const BrickLink::Item *item, const BrickL
             emit canRenderChanged(canRender());
 
             QtConcurrent::run(&RenderController::calculateRenderData, part, color)
-                .then(this, [this, color, part](RenderData data) {
-                    if ((part != m_part) || (color != m_color))
+                .then(this, [this, part](RenderData data) {
+                    if (part != m_part)
                         return;
                     applyRenderData(std::move(data));
                 });
@@ -182,7 +200,9 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
     float radius = 0;
     QHash<const BrickLink::Color *, QByteArray> surfaceBuffers;
 
-    fillVertexBuffers(part.get(), color, color, QMatrix4x4(), false, surfaceBuffers, rd.lineBuffer);
+    fillVertexBuffers(part.get(), nullptr, QMatrix4x4(), false, surfaceBuffers, rd.lineBuffer);
+
+    generateMaterialTextureImage(color); // pre-warm the cache off the GUI thread
 
     for (auto it = surfaceBuffers.cbegin(); it != surfaceBuffers.cend(); ++it) {
         const QByteArray &data = it.value();
@@ -190,7 +210,9 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
             continue;
 
         const BrickLink::Color *surfaceColor = it.key();
-        const int stride = (3 + 3 + (isTexturedColor(surfaceColor) ? 2 : 0)) * int(sizeof(float));
+        const int stride = (3 + 3 + (needsUV(surfaceColor) ? 2 : 0)) * int(sizeof(float));
+
+        generateMaterialTextureImage(surfaceColor); // pre-warm the cache off the GUI thread
 
         // calculate bounding box
         static constexpr auto fmin = std::numeric_limits<float>::lowest();
@@ -215,8 +237,7 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
         }
         surfaceRadius = std::sqrt(surfaceRadius);
 
-        rd.surfaces.emplace_back(surfaceColor, data, generateMaterialTextureImage(surfaceColor),
-                                 vmin, vmax, surfaceCenter, surfaceRadius);
+        rd.surfaces.emplace_back(surfaceColor, data, vmin, vmax, surfaceCenter, surfaceRadius);
     }
 
     for (const auto &surface : std::as_const(rd.surfaces)) {
@@ -258,27 +279,18 @@ void RenderController::applyRenderData(RenderData &&data)
     m_geos.reserve(qsizetype(data.surfaces.size()));
 
     for (const auto &surface : std::as_const(data.surfaces)) {
-        const bool isTextured = isTexturedColor(surface.color);
-        const int stride = (3 + 3 + (isTextured ? 2 : 0)) * int(sizeof(float));
+        const bool inherits = !surface.color;
+        const auto *color = inherits ? m_color : surface.color;
+        const int stride = (3 + 3 + (needsUV(surface.color) ? 2 : 0)) * int(sizeof(float));
 
-        auto geo = std::make_unique<QmlRenderGeometry>(surface.color);
+        auto geo = std::make_unique<QmlRenderGeometry>(color, inherits);
         geo->setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
         geo->setStride(stride);
         geo->addAttribute(QQuick3DGeometry::Attribute::PositionSemantic, 0, QQuick3DGeometry::Attribute::F32Type);
         geo->addAttribute(QQuick3DGeometry::Attribute::NormalSemantic, 3 * sizeof(float), QQuick3DGeometry::Attribute::F32Type);
-        if (isTextured) {
+        if (needsUV(surface.color))
             geo->addAttribute(QQuick3DGeometry::Attribute::TexCoord0Semantic, 6 * sizeof(float), QQuick3DGeometry::Attribute::F32Type);
-
-            auto texData = std::make_unique<QQuick3DTextureData>();
-            texData->setFormat(QQuick3DTextureData::RGBA8);
-            texData->setSize(surface.textureImage.size());
-            texData->setHasTransparency(surface.color->ldrawColor().alpha() < 255);
-            texData->setTextureData(QByteArray { reinterpret_cast<const char *>(surface.textureImage.constBits()),
-                                                 surface.textureImage.sizeInBytes() });
-            texData->setParentItem(geo.get());  // 3D scene parent
-            texData->setParent(geo.get());      // owning parent
-            geo->setTextureData(texData.release());
-        }
+        geo->setTextureData(createTextureData(color, geo.get()));
         geo->setBounds(surface.boundsMin, surface.boundsMax);
         geo->setCenter(surface.center);
         geo->setRadius(surface.radius);
@@ -299,6 +311,38 @@ void RenderController::applyRenderData(RenderData &&data)
         emit radiusChanged();
     }
     emit itemOrColorChanged();
+}
+
+// returns nullptr for colors without a generated texture; the texture data is parented to geo
+QQuick3DTextureData *RenderController::createTextureData(const BrickLink::Color *color, QmlRenderGeometry *geo)
+{
+    const QImage texImage = generateMaterialTextureImage(color);
+    if (texImage.isNull())
+        return nullptr;
+
+    auto texData = std::make_unique<QQuick3DTextureData>();
+    texData->setFormat(QQuick3DTextureData::RGBA8);
+    texData->setSize(texImage.size());
+    texData->setHasTransparency(color->ldrawColor().alpha() < 255);
+    texData->setTextureData(QByteArray { reinterpret_cast<const char *>(texImage.constBits()),
+                                         texImage.sizeInBytes() });
+    texData->setParentItem(geo);  // 3D scene parent
+    texData->setParent(geo);      // owning parent
+    return texData.release();
+}
+
+void RenderController::updateSurfaceColors()
+{
+    for (auto *geo : std::as_const(m_geos)) {
+        if (geo->inheritsModelColor())
+            geo->setModelColor(m_color, createTextureData(m_color, geo));
+    }
+}
+
+QColor RenderController::edgeColor() const
+{
+    const QColor c = m_color ? m_color->ldrawEdgeColor() : QColor();
+    return c.isValid() ? c : QColor(Qt::black);
 }
 
 std::vector<std::pair<float, float>> RenderController::uvMapToNearestPlane(const QVector3D &normal,
@@ -331,9 +375,9 @@ std::vector<std::pair<float, float>> RenderController::uvMapToNearestPlane(const
     return uv;
 }
 
-void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *modelColor,
-                                         const BrickLink::Color *baseColor,const QMatrix4x4 &matrix,
-                                         bool inverted, QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
+void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *baseColor,
+                                         const QMatrix4x4 &matrix, bool inverted,
+                                         QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
                                          QByteArray &lineBuffer)
 {
     if (!part)
@@ -350,9 +394,10 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
         memcpy(ptr, fs.begin(), size);
     };
 
-    auto mapColor = [&baseColor, &modelColor](int colorId) -> const BrickLink::Color * {
-        auto c = (colorId == 16) ? (baseColor ? baseColor : modelColor)
-                                 : BrickLink::core()->colorFromLDrawId(colorId);
+    auto mapColor = [&baseColor](int colorId) -> const BrickLink::Color * {
+        if (colorId == 16)
+            return baseColor; // nullptr: inherits the model color
+        auto c = BrickLink::core()->colorFromLDrawId(colorId);
         if (!c && colorId >= 256) {
             int newColorId = ((colorId - 256) & 0x0f);
             qCWarning(LogLDraw) << "Dithered colors are not supported, using only one:"
@@ -366,12 +411,12 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
         return c;
     };
 
-    auto mapEdgeQColor = [&baseColor, &modelColor](int colorId) -> QColor {
+    auto mapEdgeQColor = [&baseColor](int colorId) -> QColor {
         if (colorId == 24) {
-            if (baseColor)
-                return baseColor->ldrawEdgeColor();
-            else if (modelColor)
-                return modelColor->ldrawEdgeColor();
+            if (!baseColor)
+                return { }; // invalid: the model's edge color, substituted in the line shader
+            const QColor c = baseColor->ldrawEdgeColor();
+            return c.isValid() ? c : QColor(Qt::black);
         } else if (auto *c = BrickLink::core()->colorFromLDrawId(colorId)) {
             return c->ldrawColor();
         }
@@ -408,7 +453,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
             const auto p2m = matrix.map(ccw ? p[1] : p[2]);
             const auto n = QVector3D::normal(p0m, p1m, p2m);
 
-            if (isTexturedColor(color)) {
+            if (needsUV(color)) {
                 const auto uv = uvMapToNearestPlane(n, { p0m, p1m, p2m });
 
                 addFloatsToByteArray(surfaceBuffers[color], {
@@ -433,7 +478,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
             const auto p3m = matrix.map(ccw ? p[1] : p[3]);
             const auto n = QVector3D::normal(p0m, p1m, p2m);
 
-            if (isTexturedColor(color)) {
+            if (needsUV(color)) {
                 const auto uv = uvMapToNearestPlane(n, { p0m, p1m, p2m, p3m });
 
                 addFloatsToByteArray(surfaceBuffers[color], {
@@ -478,7 +523,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
             const auto pe = static_cast<const PartElement *>(e);
             bool matrixReversed = (pe->matrix().determinant() < 0);
 
-            fillVertexBuffers(pe->part().get(), modelColor, mapColor(pe->color()), matrix * pe->matrix(),
+            fillVertexBuffers(pe->part().get(), mapColor(pe->color()), matrix * pe->matrix(),
                               inverted ^ invertNext ^ matrixReversed, surfaceBuffers, lineBuffer);
             break;
         }

@@ -29,6 +29,7 @@ class RenderController : public QObject
     Q_OBJECT
     QML_NAMED_ELEMENT(RenderController)
     Q_PROPERTY(QColor clearColor READ clearColor WRITE setClearColor NOTIFY clearColorChanged FINAL)
+    Q_PROPERTY(QColor edgeColor READ edgeColor NOTIFY edgeColorChanged FINAL)
     Q_PROPERTY(QList<LDraw::QmlRenderGeometry *> surfaces READ surfaces NOTIFY surfacesChanged FINAL)
     Q_PROPERTY(QQuick3DGeometry * lineGeometry READ lineGeometry CONSTANT FINAL)
     Q_PROPERTY(QQuick3DInstancing * lines READ lines CONSTANT FINAL)
@@ -63,6 +64,9 @@ public:
     const QColor &clearColor() const;
     void setClearColor(const QColor &newClearColor);
 
+    // the complement color for LDraw color 24 lines, applied via the line shader
+    QColor edgeColor() const;
+
 public slots:
     void resetCamera();
 
@@ -83,14 +87,16 @@ signals:
     void qmlResetCamera(); //TODO find something nicer
 
     void clearColorChanged(const QColor &clearColor);
+    void edgeColorChanged(const QColor &edgeColor);
 
 private:
-    // calculated on a worker thread, so plain data only
+    // calculated on a worker thread, so plain data only. The data is color-independent:
+    // LDraw color 16 surfaces (color == nullptr) and color 24 lines are resolved against the
+    // current model color at material level, so a color change needs no rebuild.
     struct RenderData {
         struct Surface {
-            const BrickLink::Color *color = nullptr;
+            const BrickLink::Color *color = nullptr; // nullptr: inherits the model color
             QByteArray vertexData;
-            QImage textureImage; // isNull() unless the color needs a generated texture
             QVector3D boundsMin;
             QVector3D boundsMax;
             QVector3D center;
@@ -103,14 +109,18 @@ private:
         float radius = 0;
     };
 
+    // color is only used to pre-warm the texture image cache off the GUI thread
     static RenderData calculateRenderData(const PartRef &part, const BrickLink::Color *color);
     void applyRenderData(RenderData &&data);
+    void updateSurfaceColors();
 
-    static void fillVertexBuffers(Part *part, const BrickLink::Color *modelColor,
-                                  const BrickLink::Color *baseColor, const QMatrix4x4 &matrix,
-                                  bool inverted, QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
+    // baseColor == nullptr means "inherits the model color" (LDraw color 16)
+    static void fillVertexBuffers(Part *part, const BrickLink::Color *baseColor,
+                                  const QMatrix4x4 &matrix, bool inverted,
+                                  QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
                                   QByteArray &lineBuffer);
     static QImage generateMaterialTextureImage(const BrickLink::Color *color);
+    static QQuick3DTextureData *createTextureData(const BrickLink::Color *color, QmlRenderGeometry *geo);
     static std::vector<std::pair<float, float> > uvMapToNearestPlane(const QVector3D &normal,
                                                                      std::initializer_list<const QVector3D> vectors);
 

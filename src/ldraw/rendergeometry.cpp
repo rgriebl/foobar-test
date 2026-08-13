@@ -8,10 +8,24 @@
 
 namespace LDraw {
 
-QmlRenderGeometry::QmlRenderGeometry(const BrickLink::Color *color)
+QmlRenderGeometry::QmlRenderGeometry(const BrickLink::Color *color, bool inheritsModelColor)
     : QQuick3DGeometry()
     , m_color(color)
+    , m_inheritsModelColor(inheritsModelColor)
 { }
+
+void QmlRenderGeometry::setModelColor(const BrickLink::Color *color, QQuick3DTextureData *textureData)
+{
+    if (!m_inheritsModelColor || !color) {
+        delete textureData;
+        return;
+    }
+    auto *oldTexture = m_texture;
+    m_color = color;
+    m_texture = textureData;
+    emit colorChanged(); // the QML bindings re-read textureData before oldTexture is deleted
+    delete oldTexture;
+}
 
 QmlRenderLineInstancing::QmlRenderLineInstancing()
 {
@@ -54,7 +68,7 @@ void QmlRenderLineInstancing::addLineToBuffer(QByteArray &buffer, const QColor &
     if (buffer.size() > 100000000)
         return;
 
-    QQuick3DInstancing::InstanceTableEntry entry { { p0, 0 },
+    QQuick3DInstancing::InstanceTableEntry entry { { p0, c.isValid() ? 0.f : 1.f /* model edge color */ },
                                                    { p1, 0 },
                                                    { },
                                                    QVector4D { c.redF(), c.greenF(), c.blueF(), c.alphaF() },
@@ -70,7 +84,7 @@ void QmlRenderLineInstancing::addConditionalLineToBuffer(QByteArray &buffer, con
     if (buffer.size() > 100000000)
         return;
 
-    QQuick3DInstancing::InstanceTableEntry entry { { p0, 0 },
+    QQuick3DInstancing::InstanceTableEntry entry { { p0, c.isValid() ? 0.f : 1.f /* model edge color */ },
                                                    { p1, 0 },
                                                    { p2, 0 },
                                                    QVector4D { c.redF(), c.greenF(), c.blueF(), c.alphaF() },

@@ -210,6 +210,12 @@ Item {
                 materials: CustomMaterial {
                     property real customLineWidth: RenderSettings.lineThickness * rootNode.scale.x / 50
                     property size resolution: Qt.size(view.width, view.height)
+                    // vector4d instead of color: color uniforms get an sRGB->linear conversion,
+                    // but this has to match the raw sRGB instance colors
+                    property vector4d customEdgeColor: {
+                        let c = root.renderController.edgeColor
+                        return Qt.vector4d(c.r, c.g, c.b, c.a)
+                    }
 
                     cullMode: Material.BackFaceCulling
                     shadingMode: CustomMaterial.Unshaded

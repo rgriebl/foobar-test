@@ -69,5 +69,7 @@ void MAIN()
     // Note we're undoing the perspective divide we performed earlier:
 
     POSITION = vec4(clip.w * ((2.0 * pt) / resolution - 1.0), clip.z, clip.w);
-    col = INSTANCE_COLOR;
+
+    // qt_instanceTransform0.w == 1 marks lines drawn in the model's edge color
+    col = (qt_instanceTransform0.w > 0.0) ? customEdgeColor : INSTANCE_COLOR;
 }
