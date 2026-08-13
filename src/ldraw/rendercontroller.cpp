@@ -192,7 +192,7 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
         auto geo = std::make_unique<QmlRenderGeometry>(surfaceColor);
 
         // calculate bounding box
-        static constexpr auto fmin = std::numeric_limits<float>::min();
+        static constexpr auto fmin = std::numeric_limits<float>::lowest();
         static constexpr auto fmax = std::numeric_limits<float>::max();
 
         QVector3D vmin = QVector3D(fmax, fmax, fmax);
@@ -483,7 +483,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
 
 std::unique_ptr<QQuick3DTextureData> RenderController::generateMaterialTextureData(const BrickLink::Color *color)
 {
-    static constexpr int GeneratorVersion = 1;
+    static constexpr int GeneratorVersion = 2; // v1 PNGs were saved with red/blue swapped
 
     if (color && (color->hasParticles() || color->id() == 0)) {
         QImage texImage = s_materialTextureDatas.value(color);
@@ -592,12 +592,15 @@ std::unique_ptr<QQuick3DTextureData> RenderController::generateMaterialTextureDa
                     p.drawPixmapFragments(fragments.constData(), int(fragments.count()), particle);
                     p.end();
 
-                    texImage = img.copy(delta, delta, texSize, texSize).rgbSwapped()
+                    texImage = img.copy(delta, delta, texSize, texSize)
                                    .scaled(texSize / 2, texSize / 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
                 }
                 QDir(QFileInfo(cacheFile).absolutePath()).mkpath(u"."_qs);
                 texImage.save(cacheFile);
             }
+            // the RGBA8 upload below needs RGBA byte order and straight alpha
+            if (texImage.format() != QImage::Format_RGBA8888)
+                texImage = texImage.convertToFormat(QImage::Format_RGBA8888);
             s_materialTextureDatas.insert(color, texImage);
         }
 
