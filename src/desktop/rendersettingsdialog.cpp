@@ -36,6 +36,7 @@ RenderSettingsDialog::RenderSettingsDialog()
     connectSliderAndSpinBox(ui->pearlRoughnessSlider,    ui->pearlRoughness,    "pearlRoughness");
 
     connectToggleButton(ui->orthographicCamera,  "orthographicCamera");
+    connectToggleButton(ui->smoothNormals,       "smoothNormals");
     connectToggleButton(ui->showLines,           "renderLines");
     connectToggleButton(ui->showBoundingSpheres, "showBoundingSpheres");
     connectToggleButton(ui->enableLighting,      "lighting");

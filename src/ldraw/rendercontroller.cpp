@@ -20,6 +20,8 @@
 #include "library.h"
 #include "part.h"
 #include "rendercontroller.h"
+#include "rendersettings.h"
+#include "smoothnormals.h"
 
 using namespace std::chrono_literals;
 
@@ -59,6 +61,9 @@ RenderController::RenderController(QObject *parent)
     m_lineGeo->addAttribute(QQuick3DGeometry::Attribute::PositionSemantic, 0, QQuick3DGeometry::Attribute::F32Type);
     m_lineGeo->setVertexData(QByteArray::fromRawData(reinterpret_cast<const char *>(lineGeo.data()),
                                                      qsizetype(lineGeo.size() * sizeof(decltype(lineGeo)::value_type))));
+
+    connect(RenderSettings::inst(), &RenderSettings::smoothNormalsChanged,
+            this, &RenderController::regenerate);
 }
 
 RenderController::~RenderController()
@@ -166,7 +171,7 @@ void RenderController::setItemAndColor(const BrickLink::Item *item, const BrickL
 
     if (item) {
         LDraw::library()->partFromBrickLinkId(item->id())
-            .then(this, [this, item, color](const PartRef &part) {
+            .then(this, [this, item](const PartRef &part) {
             if (!part || (item != m_item))
                 return;
 
@@ -174,15 +179,24 @@ void RenderController::setItemAndColor(const BrickLink::Item *item, const BrickL
 
             emit canRenderChanged(canRender());
 
-            QtConcurrent::run(&RenderController::calculateRenderData, part, color)
-                .then(this, [this, part](RenderData data) {
-                    if (part != m_part)
-                        return;
-                    applyRenderData(std::move(data));
-                });
+            regenerate();
         });
     }
     applyRenderData({});
+}
+
+void RenderController::regenerate()
+{
+    if (!m_part)
+        return;
+
+    QtConcurrent::run(&RenderController::calculateRenderData, m_part, m_color,
+                      RenderSettings::inst()->smoothNormals())
+        .then(this, [this, part = m_part](RenderData data) {
+            if (part != m_part)
+                return;
+            applyRenderData(std::move(data));
+        });
 }
 
 bool RenderController::canRender() const
@@ -190,7 +204,8 @@ bool RenderController::canRender() const
     return bool(m_part);
 }
 
-RenderController::RenderData RenderController::calculateRenderData(const PartRef &part, const BrickLink::Color *color)
+RenderController::RenderData RenderController::calculateRenderData(const PartRef &part, const BrickLink::Color *color,
+                                                                   bool smooth)
 {
     if (!part)
         return { };
@@ -201,6 +216,14 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
     QHash<const BrickLink::Color *, QByteArray> surfaceBuffers;
 
     fillVertexBuffers(part.get(), nullptr, QMatrix4x4(), false, surfaceBuffers, rd.lineBuffer);
+
+    if (smooth) {
+        QList<SmoothBuffer> smoothBuffers;
+        smoothBuffers.reserve(surfaceBuffers.size());
+        for (auto it = surfaceBuffers.begin(); it != surfaceBuffers.end(); ++it)
+            smoothBuffers.append({ &it.value(), (3 + 3 + (needsUV(it.key()) ? 2 : 0)) * int(sizeof(float)) });
+        smoothNormals(smoothBuffers, rd.lineBuffer);
+    }
 
     generateMaterialTextureImage(color); // pre-warm the cache off the GUI thread
 
@@ -274,8 +297,13 @@ void RenderController::applyRenderData(RenderData &&data)
     if (!data.lineBuffer.isEmpty())
         m_lines->setBuffer(data.lineBuffer);
     m_lines->update();
-    qDeleteAll(m_geos);
-    m_geos.clear();
+
+    // build the new geometries before deleting the old ones: if the old ones were deleted
+    // first, the allocator could reuse their addresses, making the new surfaces list compare
+    // equal to the old one - Repeater3D would then skip the delegate rebuild and keep its
+    // references to the deleted geometries
+    QList<QmlRenderGeometry *> oldGeos;
+    std::swap(oldGeos, m_geos);
     m_geos.reserve(qsizetype(data.surfaces.size()));
 
     for (const auto &surface : std::as_const(data.surfaces)) {
@@ -301,6 +329,7 @@ void RenderController::applyRenderData(RenderData &&data)
     data.surfaces.clear();
 
     emit surfacesChanged();
+    qDeleteAll(oldGeos);
 
     if (m_center != data.center) {
         m_center = data.center;

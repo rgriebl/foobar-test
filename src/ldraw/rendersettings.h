@@ -21,6 +21,7 @@ class RenderSettings : public QObject
     Q_PROPERTY(bool lighting MEMBER m_lighting NOTIFY lightingChanged FINAL)
     Q_PROPERTY(bool renderLines MEMBER m_renderLines NOTIFY renderLinesChanged FINAL)
     Q_PROPERTY(float lineThickness MEMBER m_lineThickness NOTIFY lineThicknessChanged FINAL)
+    Q_PROPERTY(bool smoothNormals MEMBER m_smoothNormals NOTIFY smoothNormalsChanged FINAL)
     Q_PROPERTY(bool showBoundingSpheres MEMBER m_showBoundingSpheres NOTIFY showBoundingSpheresChanged FINAL)
     Q_PROPERTY(float tumblingAnimationAngle MEMBER m_tumblingAnimationAngle NOTIFY tumblingAnimationAngleChanged FINAL)
     Q_PROPERTY(QVector3D tumblingAnimationAxis MEMBER m_tumblingAnimationAxis NOTIFY tumblingAnimationAxisChanged FINAL)
@@ -54,6 +55,8 @@ public:
     Q_ENUM(AntiAliasing)
 
 public:
+    bool smoothNormals() const  { return m_smoothNormals; }
+
     void save();
     void load();
     void resetToDefaults();
@@ -66,6 +69,7 @@ signals:
     void lightingChanged(bool newLighting);
     void renderLinesChanged(bool newRenderLines);
     void lineThicknessChanged(float newLineThickness);
+    void smoothNormalsChanged(bool newSmoothNormals);
     void showBoundingSpheresChanged(bool newShowBoundingSpheres);
     void tumblingAnimationAngleChanged(float newTumblingAnimationAngle);
     void tumblingAnimationAxisChanged(const QVector3D &newTumblingAnimationAxis);
@@ -97,6 +101,7 @@ private:
     bool m_lighting { };
     bool m_renderLines { };
     float m_lineThickness { };
+    bool m_smoothNormals { };
     bool m_showBoundingSpheres { };
     float m_tumblingAnimationAngle { };
     QVector3D m_tumblingAnimationAxis { };

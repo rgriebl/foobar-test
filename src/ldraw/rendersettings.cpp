@@ -71,6 +71,7 @@ QVariantMap RenderSettings::propertyDefaultValues() const
         { u"lighting"_qs, true },
         { u"renderLines"_qs, true },
         { u"lineThickness"_qs, 2 },
+        { u"smoothNormals"_qs, true },
         { u"showBoundingSpheres"_qs, false },
         { u"tumblingAnimationAngle"_qs, 0.1 },
         { u"tumblingAnimationAxis"_qs, QVariant::fromValue(QVector3D { 0.5, 0.375, 0.25 }) },

@@ -110,7 +110,9 @@ private:
     };
 
     // color is only used to pre-warm the texture image cache off the GUI thread
-    static RenderData calculateRenderData(const PartRef &part, const BrickLink::Color *color);
+    static RenderData calculateRenderData(const PartRef &part, const BrickLink::Color *color,
+                                          bool smooth);
+    void regenerate();
     void applyRenderData(RenderData &&data);
     void updateSurfaceColors();
 

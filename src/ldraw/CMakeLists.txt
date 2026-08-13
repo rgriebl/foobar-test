@@ -12,6 +12,8 @@ qt_add_library(ldraw_module STATIC
     rendergeometry.cpp
     rendersettings.h
     rendersettings.cpp
+    smoothnormals.h
+    smoothnormals.cpp
 )
 
 target_link_libraries(ldraw_module PRIVATE
