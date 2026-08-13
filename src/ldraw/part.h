@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include <QString>
 #include <QVector>
 #include <QColor>

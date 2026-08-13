@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <memory>
 #include <vector>
 
 #include <QtCore/QObject>
 #include <QtGui/QColor>
+#include <QtGui/QImage>
 #include <QtGui/QQuaternion>
 #include <QtQml/qqmlregistration.h>
 
@@ -19,7 +19,6 @@
 #include "bricklink/item.h"
 #include "bricklink/qmlapi.h"
 
-QT_FORWARD_DECLARE_CLASS(QQuick3DTextureData)
 QT_FORWARD_DECLARE_CLASS(QTimer)
 
 
@@ -86,37 +85,38 @@ signals:
     void clearColorChanged(const QColor &clearColor);
 
 private:
-    // owns its geometries until applyRenderData() takes them over: the continuation calculating
-    // them may be dropped before it ever runs, e.g. when this controller is destroyed.
-    // Move-only, also to keep QFuture from trying to copy the unique_ptrs.
+    // calculated on a worker thread, so plain data only
     struct RenderData {
-        RenderData() = default;
-        RenderData(RenderData &&) = default;
-        RenderData &operator=(RenderData &&) = default;
-        Q_DISABLE_COPY(RenderData)
+        struct Surface {
+            const BrickLink::Color *color = nullptr;
+            QByteArray vertexData;
+            QImage textureImage; // isNull() unless the color needs a generated texture
+            QVector3D boundsMin;
+            QVector3D boundsMax;
+            QVector3D center;
+            float radius = 0;
+        };
 
         QByteArray lineBuffer;
-        std::vector<std::unique_ptr<QmlRenderGeometry>> geos;
+        std::vector<Surface> surfaces;
         QVector3D center;
         float radius = 0;
     };
 
-    RenderData calculateRenderData(const PartRef &part, const BrickLink::Color *color);
+    static RenderData calculateRenderData(const PartRef &part, const BrickLink::Color *color);
     void applyRenderData(RenderData &&data);
 
     static void fillVertexBuffers(Part *part, const BrickLink::Color *modelColor,
                                   const BrickLink::Color *baseColor, const QMatrix4x4 &matrix,
                                   bool inverted, QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
                                   QByteArray &lineBuffer);
-    static std::unique_ptr<QQuick3DTextureData> generateMaterialTextureData(const BrickLink::Color *color);
+    static QImage generateMaterialTextureImage(const BrickLink::Color *color);
     static std::vector<std::pair<float, float> > uvMapToNearestPlane(const QVector3D &normal,
                                                                      std::initializer_list<const QVector3D> vectors);
 
     QList<QmlRenderGeometry *> m_geos;
     QQuick3DGeometry *m_lineGeo = nullptr;
     QmlRenderLineInstancing *m_lines = nullptr;
-
-    static QHash<const BrickLink::Color *, QImage> s_materialTextureDatas;
 
     PartRef m_part;
     const BrickLink::Item *m_item = nullptr;

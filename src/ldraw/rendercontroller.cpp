@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include <cmath>
+#include <vector>
 
 #include <QtConcurrent>
+#include <QMutex>
 #include <QRandomGenerator>
 #include <QFile>
 #include <QFileInfo>
@@ -23,7 +25,11 @@ using namespace std::chrono_literals;
 
 namespace LDraw {
 
-QHash<const BrickLink::Color *, QImage> RenderController::s_materialTextureDatas;
+// glitter, speckle and the "not applicable" checkerboard get a generated texture
+static bool isTexturedColor(const BrickLink::Color *color)
+{
+    return color && (color->hasParticles() || (color->id() == 0));
+}
 
 
 RenderController::RenderController(QObject *parent)
@@ -150,7 +156,7 @@ void RenderController::setItemAndColor(const BrickLink::Item *item, const BrickL
 
             emit canRenderChanged(canRender());
 
-            QtConcurrent::run(&RenderController::calculateRenderData, this, part, color)
+            QtConcurrent::run(&RenderController::calculateRenderData, part, color)
                 .then(this, [this, color, part](RenderData data) {
                     if ((part != m_part) || (color != m_color))
                         return;
@@ -171,13 +177,12 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
     if (!part)
         return { };
 
-    QByteArray lineBuffer;
-    std::vector<std::unique_ptr<QmlRenderGeometry>> geos;
+    RenderData rd;
     QVector3D center;
     float radius = 0;
     QHash<const BrickLink::Color *, QByteArray> surfaceBuffers;
 
-    fillVertexBuffers(part.get(), color, color, QMatrix4x4(), false, surfaceBuffers, lineBuffer);
+    fillVertexBuffers(part.get(), color, color, QMatrix4x4(), false, surfaceBuffers, rd.lineBuffer);
 
     for (auto it = surfaceBuffers.cbegin(); it != surfaceBuffers.cend(); ++it) {
         const QByteArray &data = it.value();
@@ -185,11 +190,7 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
             continue;
 
         const BrickLink::Color *surfaceColor = it.key();
-        const bool isTextured = surfaceColor->hasParticles() || (surfaceColor->id() == 0);
-
-        const int stride = (3 + 3 + (isTextured ? 2 : 0)) * int(sizeof(float));
-
-        auto geo = std::make_unique<QmlRenderGeometry>(surfaceColor);
+        const int stride = (3 + 3 + (isTexturedColor(surfaceColor) ? 2 : 0)) * int(sizeof(float));
 
         // calculate bounding box
         static constexpr auto fmin = std::numeric_limits<float>::lowest();
@@ -199,7 +200,7 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
         QVector3D vmax = QVector3D(fmin, fmin, fmin);
 
         for (int i = 0; i < data.size(); i += stride) {
-            auto v = reinterpret_cast<const float *>(it->constData() + i);
+            auto v = reinterpret_cast<const float *>(data.constData() + i);
             vmin = QVector3D(std::min(vmin.x(), v[0]), std::min(vmin.y(), v[1]), std::min(vmin.z(), v[2]));
             vmax = QVector3D(std::max(vmax.x(), v[0]), std::max(vmax.y(), v[1]), std::max(vmax.z(), v[2]));
         }
@@ -209,57 +210,38 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
         float surfaceRadius = 0;
 
         for (int i = 0; i < data.size(); i += stride) {
-            auto v = reinterpret_cast<const float *>(it->constData() + i);
+            auto v = reinterpret_cast<const float *>(data.constData() + i);
             surfaceRadius = std::max(surfaceRadius, (surfaceCenter - QVector3D { v[0], v[1], v[2] }).lengthSquared());
         }
         surfaceRadius = std::sqrt(surfaceRadius);
 
-        geo->setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
-        geo->setStride(stride);
-        geo->addAttribute(QQuick3DGeometry::Attribute::PositionSemantic, 0, QQuick3DGeometry::Attribute::F32Type);
-        geo->addAttribute(QQuick3DGeometry::Attribute::NormalSemantic, 3 * sizeof(float), QQuick3DGeometry::Attribute::F32Type);
-        if (isTextured) {
-            geo->addAttribute(QQuick3DGeometry::Attribute::TexCoord0Semantic, 6 * sizeof(float), QQuick3DGeometry::Attribute::F32Type);
-
-            auto texData = generateMaterialTextureData(surfaceColor);
-            texData->setParentItem(geo.get());  // 3D scene parent
-            texData->setParent(geo.get());      // owning parent
-            geo->setTextureData(texData.release());
-        }
-        geo->setBounds(vmin, vmax);
-        geo->setCenter(surfaceCenter);
-        geo->setRadius(surfaceRadius);
-        geo->setVertexData(data);
-
-        geos.push_back(std::move(geo));
+        rd.surfaces.emplace_back(surfaceColor, data, generateMaterialTextureImage(surfaceColor),
+                                 vmin, vmax, surfaceCenter, surfaceRadius);
     }
 
-    for (const auto &geo : std::as_const(geos)) {
+    for (const auto &surface : std::as_const(rd.surfaces)) {
         // Merge all the bounding spheres. This is not perfect, but very, very close in most cases
-        const auto geoCenter = geo->center();
-        const auto geoRadius = geo->radius();
+        const auto surfaceCenter = surface.center;
+        const auto surfaceRadius = surface.radius;
 
         if (qFuzzyIsNull(radius)) { // first one
-            center = geoCenter;
-            radius = geoRadius;
+            center = surfaceCenter;
+            radius = surfaceRadius;
         } else {
-            QVector3D d = geoCenter - center;
+            QVector3D d = surfaceCenter - center;
             float l = d.length();
 
-            if ((l + radius) < geoRadius) { // the old one is inside the new one
-                center = geoCenter;
-                radius = geoRadius;
-            } else if ((l + geoRadius) > radius) { // the new one is NOT inside the old one -> we need to merge
-                float nr = (radius + l + geoRadius) / 2;
-                center = center + (geoCenter - center).normalized() * (nr - radius);
+            if ((l + radius) < surfaceRadius) { // the old one is inside the new one
+                center = surfaceCenter;
+                radius = surfaceRadius;
+            } else if ((l + surfaceRadius) > radius) { // the new one is NOT inside the old one -> we need to merge
+                float nr = (radius + l + surfaceRadius) / 2;
+                center = center + (surfaceCenter - center).normalized() * (nr - radius);
                 radius = nr;
             }
         }
     }
 
-    RenderData rd;
-    rd.lineBuffer = std::move(lineBuffer);
-    rd.geos = std::move(geos);
     rd.center = center;
     rd.radius = radius;
     return rd;
@@ -273,10 +255,38 @@ void RenderController::applyRenderData(RenderData &&data)
     m_lines->update();
     qDeleteAll(m_geos);
     m_geos.clear();
-    m_geos.reserve(qsizetype(data.geos.size()));
-    for (auto &geo : data.geos)
+    m_geos.reserve(qsizetype(data.surfaces.size()));
+
+    for (const auto &surface : std::as_const(data.surfaces)) {
+        const bool isTextured = isTexturedColor(surface.color);
+        const int stride = (3 + 3 + (isTextured ? 2 : 0)) * int(sizeof(float));
+
+        auto geo = std::make_unique<QmlRenderGeometry>(surface.color);
+        geo->setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
+        geo->setStride(stride);
+        geo->addAttribute(QQuick3DGeometry::Attribute::PositionSemantic, 0, QQuick3DGeometry::Attribute::F32Type);
+        geo->addAttribute(QQuick3DGeometry::Attribute::NormalSemantic, 3 * sizeof(float), QQuick3DGeometry::Attribute::F32Type);
+        if (isTextured) {
+            geo->addAttribute(QQuick3DGeometry::Attribute::TexCoord0Semantic, 6 * sizeof(float), QQuick3DGeometry::Attribute::F32Type);
+
+            auto texData = std::make_unique<QQuick3DTextureData>();
+            texData->setFormat(QQuick3DTextureData::RGBA8);
+            texData->setSize(surface.textureImage.size());
+            texData->setHasTransparency(surface.color->ldrawColor().alpha() < 255);
+            texData->setTextureData(QByteArray { reinterpret_cast<const char *>(surface.textureImage.constBits()),
+                                                 surface.textureImage.sizeInBytes() });
+            texData->setParentItem(geo.get());  // 3D scene parent
+            texData->setParent(geo.get());      // owning parent
+            geo->setTextureData(texData.release());
+        }
+        geo->setBounds(surface.boundsMin, surface.boundsMax);
+        geo->setCenter(surface.center);
+        geo->setRadius(surface.radius);
+        geo->setVertexData(surface.vertexData);
+
         m_geos.append(geo.release()); // m_geos is exposed to QML, so it has to stay a raw pointer list
-    data.geos.clear();
+    }
+    data.surfaces.clear();
 
     emit surfacesChanged();
 
@@ -398,7 +408,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
             const auto p2m = matrix.map(ccw ? p[1] : p[2]);
             const auto n = QVector3D::normal(p0m, p1m, p2m);
 
-            if (color->hasParticles() || (color->id() == 0)) {
+            if (isTexturedColor(color)) {
                 const auto uv = uvMapToNearestPlane(n, { p0m, p1m, p2m });
 
                 addFloatsToByteArray(surfaceBuffers[color], {
@@ -423,7 +433,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
             const auto p3m = matrix.map(ccw ? p[1] : p[3]);
             const auto n = QVector3D::normal(p0m, p1m, p2m);
 
-            if (color->hasParticles() || (color->id() == 0)) {
+            if (isTexturedColor(color)) {
                 const auto uv = uvMapToNearestPlane(n, { p0m, p1m, p2m, p3m });
 
                 addFloatsToByteArray(surfaceBuffers[color], {
@@ -481,12 +491,17 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *mod
     }
 }
 
-std::unique_ptr<QQuick3DTextureData> RenderController::generateMaterialTextureData(const BrickLink::Color *color)
+QImage RenderController::generateMaterialTextureImage(const BrickLink::Color *color)
 {
     static constexpr int GeneratorVersion = 2; // v1 PNGs were saved with red/blue swapped
 
-    if (color && (color->hasParticles() || color->id() == 0)) {
-        QImage texImage = s_materialTextureDatas.value(color);
+    if (isTexturedColor(color)) {
+        // shared between all controllers' worker threads
+        static QMutex cacheMutex;
+        static QHash<const BrickLink::Color *, QImage> cache;
+        QMutexLocker locker(&cacheMutex);
+
+        QImage texImage = cache.value(color);
 
         if (texImage.isNull()) {
             QString cacheName;
@@ -598,19 +613,12 @@ std::unique_ptr<QQuick3DTextureData> RenderController::generateMaterialTextureDa
                 QDir(QFileInfo(cacheFile).absolutePath()).mkpath(u"."_qs);
                 texImage.save(cacheFile);
             }
-            // the RGBA8 upload below needs RGBA byte order and straight alpha
+            // the RGBA8 texture upload needs RGBA byte order and straight alpha
             if (texImage.format() != QImage::Format_RGBA8888)
                 texImage = texImage.convertToFormat(QImage::Format_RGBA8888);
-            s_materialTextureDatas.insert(color, texImage);
+            cache.insert(color, texImage);
         }
-
-        auto texData = std::make_unique<QQuick3DTextureData>();
-        texData->setFormat(QQuick3DTextureData::RGBA8);
-        texData->setSize(texImage.size());
-        texData->setHasTransparency(color->ldrawColor().alpha() < 255);
-        texData->setTextureData(QByteArray { reinterpret_cast<const char *>(texImage.constBits()),
-                                             texImage.sizeInBytes() });
-        return texData;
+        return texImage;
     }
     return { };
 }
