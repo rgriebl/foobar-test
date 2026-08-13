@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -79,10 +80,233 @@ quint64 edgeKey(quint32 a, quint32 b)
     return (quint64(a) << 32) | b;
 }
 
+constexpr int MaxStrideFloats = 8;
+
+// The tolerance for "vertex lies on an edge" has to cover the sagitta between a fine arc
+// and the coarse chord subdividing it: 48-in-16 vertices sit at 4.4% of the edge length
+// off the chord, while unrelated geometry starts at ~90% (measured on part 12885).
+float splitTolerance(float edgeLength)
+{
+    return 0.05f + (0.05f * edgeLength);
+}
+
+struct CandidateGrid
+{
+    static constexpr float CellSize = 2.f;
+
+    std::vector<QVector3D> points;
+    std::unordered_map<quint64, std::vector<quint32>> grid;
+
+    void add(const QVector3D &p)
+    {
+        grid[VertexWelder::cellKey(int(std::floor(p.x() / CellSize)),
+                                   int(std::floor(p.y() / CellSize)),
+                                   int(std::floor(p.z() / CellSize)))]
+            .push_back(quint32(points.size()));
+        points.push_back(p);
+    }
+
+    // returns a point in the interior of (p0, p1), within splitTolerance() of it
+    std::optional<QVector3D> findOnEdge(const QVector3D &p0, const QVector3D &p1) const
+    {
+        const QVector3D d = p1 - p0;
+        const float len2 = d.lengthSquared();
+        const float len = std::sqrt(len2);
+        const float tol = splitTolerance(len);
+        if (len < (3 * tol)) // no room for an interior point
+            return { };
+
+        const int steps = int(len / CellSize) + 1;
+        for (int k = 0; k <= steps; ++k) {
+            const QVector3D s = p0 + d * (float(k) / float(steps));
+            const int cx = int(std::floor(s.x() / CellSize));
+            const int cy = int(std::floor(s.y() / CellSize));
+            const int cz = int(std::floor(s.z() / CellSize));
+
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        auto it = grid.find(VertexWelder::cellKey(cx + dx, cy + dy, cz + dz));
+                        if (it == grid.end())
+                            continue;
+                        for (quint32 idx : it->second) {
+                            const QVector3D &c = points[idx];
+                            const float t = QVector3D::dotProduct(c - p0, d) / len2;
+                            if ((t <= 0.f) || (t >= 1.f))
+                                continue;
+                            if ((c - (p0 + d * t)).lengthSquared() > (tol * tol))
+                                continue;
+                            if (((c - p0).lengthSquared() <= (tol * tol))
+                                    || ((c - p1).lengthSquared() <= (tol * tol)))
+                                continue;
+                            return c;
+                        }
+                    }
+                }
+            }
+        }
+        return { };
+    }
+};
+
+// Recursively splits (a, b, c) at candidate points on its open edges and appends the
+// resulting triangles to out. openX flags edge (a,b) / (b,c) / (c,a); sub-edges of a split
+// edge stay open, the new diagonals are closed. The split vertex takes the exact candidate
+// position, so the later welding connects it with the other side of the seam.
+void emitSplitTriangles(const float *a, const float *b, const float *c,
+                        bool openA, bool openB, bool openC,
+                        int strideFloats, const CandidateGrid &candidates,
+                        int depth, std::vector<float> &out)
+{
+    if (depth < 24) {
+        const float *v[3] = { a, b, c };
+        const bool open[3] = { openA, openB, openC };
+
+        for (int e = 0; e < 3; ++e) {
+            if (!open[e])
+                continue;
+            const float *e0 = v[e];
+            const float *e1 = v[(e + 1) % 3];
+            const float *opp = v[(e + 2) % 3];
+            const QVector3D p0(e0[0], e0[1], e0[2]);
+            const QVector3D p1(e1[0], e1[1], e1[2]);
+
+            const auto split = candidates.findOnEdge(p0, p1);
+            if (!split)
+                continue;
+
+            const QVector3D d = p1 - p0;
+            const float t = QVector3D::dotProduct(*split - p0, d) / d.lengthSquared();
+
+            float m[MaxStrideFloats];
+            for (int k = 0; k < strideFloats; ++k)
+                m[k] = e0[k] + ((e1[k] - e0[k]) * t);
+            m[0] = split->x();
+            m[1] = split->y();
+            m[2] = split->z();
+
+            emitSplitTriangles(e0, m, opp, open[e], false, open[(e + 2) % 3],
+                               strideFloats, candidates, depth + 1, out);
+            emitSplitTriangles(m, e1, opp, open[e], open[(e + 1) % 3], false,
+                               strideFloats, candidates, depth + 1, out);
+            return;
+        }
+    }
+    out.insert(out.end(), a, a + strideFloats);
+    out.insert(out.end(), b, b + strideFloats);
+    out.insert(out.end(), c, c + strideFloats);
+}
+
+// Where hi-res meets lo-res geometry (48 vs 16 sided primitives), the fine side's vertices
+// lie in the interior of the coarse side's edges: nothing welds, the seam neither closes
+// nor smooths. This pass splits those edges at those vertices. Both the split targets and
+// the candidate vertices can only come from open edges (edges owned by a single triangle),
+// which keeps the search space tiny.
+void splitTJunctions(const QList<SmoothBuffer> &buffers)
+{
+    qsizetype totalVertexCount = 0;
+    for (const auto &buffer : buffers)
+        totalVertexCount += (buffer.vertexData->size() / buffer.stride);
+    if (!totalVertexCount)
+        return;
+
+    VertexWelder welder;
+    welder.positions.reserve(size_t(totalVertexCount) / 3);
+    welder.grid.reserve(size_t(totalVertexCount) / 3);
+
+    std::vector<quint32> cornerVids;
+    cornerVids.reserve(size_t(totalVertexCount));
+
+    for (const auto &buffer : buffers) {
+        const char *base = buffer.vertexData->constData();
+        const qsizetype n = buffer.vertexData->size() / buffer.stride;
+        for (qsizetype i = 0; i < n; ++i) {
+            const auto *fp = reinterpret_cast<const float *>(base + i * buffer.stride);
+            cornerVids.push_back(welder.weld(QVector3D(fp[0], fp[1], fp[2])));
+        }
+    }
+
+    std::vector<quint64> edgeKeys;
+    edgeKeys.reserve(cornerVids.size());
+    for (size_t c = 0; (c + 2) < cornerVids.size(); c += 3) {
+        for (int e = 0; e < 3; ++e) {
+            const quint32 a = cornerVids[c + size_t(e)];
+            const quint32 b = cornerVids[c + size_t((e + 1) % 3)];
+            if (a != b)
+                edgeKeys.push_back(edgeKey(a, b));
+        }
+    }
+    std::sort(edgeKeys.begin(), edgeKeys.end());
+
+    std::unordered_set<quint64> openEdges;
+    std::unordered_set<quint32> candidateVids;
+    for (size_t i = 0; i < edgeKeys.size(); ) {
+        size_t j = i + 1;
+        while ((j < edgeKeys.size()) && (edgeKeys[j] == edgeKeys[i]))
+            ++j;
+        if ((j - i) == 1) {
+            openEdges.insert(edgeKeys[i]);
+            candidateVids.insert(quint32(edgeKeys[i] >> 32));
+            candidateVids.insert(quint32(edgeKeys[i] & 0xffffffff));
+        }
+        i = j;
+    }
+    if (openEdges.empty())
+        return;
+
+    CandidateGrid candidates;
+    candidates.points.reserve(candidateVids.size());
+    for (quint32 vid : candidateVids)
+        candidates.add(welder.positions[vid]);
+
+    size_t cornerBase = 0;
+    for (const auto &buffer : buffers) {
+        const int strideFloats = buffer.stride / int(sizeof(float));
+        Q_ASSERT(strideFloats <= MaxStrideFloats);
+        const qsizetype n = buffer.vertexData->size() / buffer.stride;
+        const auto *base = reinterpret_cast<const float *>(buffer.vertexData->constData());
+
+        std::vector<float> out;
+        out.reserve(size_t(n) * size_t(strideFloats));
+        bool changed = false;
+
+        for (qsizetype tri = 0; (tri + 2) < n; tri += 3) {
+            const float *a = base + (tri * strideFloats);
+
+            bool open[3];
+            bool anyOpen = false;
+            for (int e = 0; e < 3; ++e) {
+                const quint32 va = cornerVids[cornerBase + size_t(tri) + size_t(e)];
+                const quint32 vb = cornerVids[cornerBase + size_t(tri) + size_t((e + 1) % 3)];
+                open[e] = (va != vb) && openEdges.contains(edgeKey(va, vb));
+                anyOpen = anyOpen || open[e];
+            }
+
+            if (anyOpen) {
+                const size_t before = out.size();
+                emitSplitTriangles(a, a + strideFloats, a + (2 * strideFloats),
+                                   open[0], open[1], open[2],
+                                   strideFloats, candidates, 0, out);
+                changed = changed || (out.size() != (before + (3 * size_t(strideFloats))));
+            } else {
+                out.insert(out.end(), a, a + (3 * strideFloats));
+            }
+        }
+        cornerBase += size_t(n);
+
+        if (changed) {
+            *buffer.vertexData = QByteArray(reinterpret_cast<const char *>(out.data()),
+                                            qsizetype(out.size() * sizeof(float)));
+        }
+    }
+}
+
 } // namespace
 
 void smoothNormals(const QList<SmoothBuffer> &buffers, const QByteArray &lineBuffer)
 {
+    splitTJunctions(buffers);
+
     qsizetype totalVertexCount = 0;
     for (const auto &buffer : buffers)
         totalVertexCount += (buffer.vertexData->size() / buffer.stride);

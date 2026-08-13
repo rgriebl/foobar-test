@@ -16,6 +16,9 @@ struct SmoothBuffer
 };
 
 // Replaces the flat per-face normals in the vertex buffers with smoothed per-vertex normals:
+//  * T-junctions are split first: where hi-res and lo-res primitives meet, the fine side's
+//    vertices lie in the interior of the coarse side's edges, so those edges are split at
+//    those vertices to make the seam weldable
 //  * vertices are welded position-wise (epsilon based), across all buffers, so smoothing
 //    works across color and sub-part boundaries
 //  * an edge shared by exactly two triangles is kept hard if a type 2 edge line runs along
