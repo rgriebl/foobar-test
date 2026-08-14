@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -84,37 +84,47 @@ constexpr int MaxStrideFloats = 8;
 
 // The tolerance for "vertex lies on an edge" has to cover the sagitta between a fine arc
 // and the coarse chord subdividing it: 48-in-16 vertices sit at 4.4% of the edge length
-// off the chord, while unrelated geometry starts at ~90% (measured on part 12885).
+// off the chord (measured on part 12885). It only gates which candidates are considered;
+// the chain verification in findChain() is what rejects unrelated geometry.
 float splitTolerance(float edgeLength)
 {
-    return 0.05f + (0.05f * edgeLength);
+    return std::min(0.05f + (0.065f * edgeLength), 0.5f);
 }
 
-struct CandidateGrid
+// Split targets and candidates both come from open edges (owned by a single triangle).
+// Candidates near the interior of an open edge only qualify if they chain from one edge
+// endpoint to the other via open edges: the fine side of a real T-junction seam replaces
+// the coarse edge completely. Unrelated geometry that merely passes nearby (wall rims at
+// 2 LDU offsets, logo strokes) has no such chain and is left alone.
+struct TJunctionContext
 {
     static constexpr float CellSize = 2.f;
 
-    std::vector<QVector3D> points;
+    const std::vector<QVector3D> &positions;
+    const std::unordered_set<quint64> &openEdges;
     std::unordered_map<quint64, std::vector<quint32>> grid;
 
-    void add(const QVector3D &p)
+    void addCandidate(quint32 vid)
     {
+        const QVector3D &p = positions[vid];
         grid[VertexWelder::cellKey(int(std::floor(p.x() / CellSize)),
                                    int(std::floor(p.y() / CellSize)),
-                                   int(std::floor(p.z() / CellSize)))]
-            .push_back(quint32(points.size()));
-        points.push_back(p);
+                                   int(std::floor(p.z() / CellSize)))].push_back(vid);
     }
 
-    // returns a point in the interior of (p0, p1), within splitTolerance() of it
-    std::optional<QVector3D> findOnEdge(const QVector3D &p0, const QVector3D &p1) const
+    // fills chain with the candidate vids on the interior of (vA, vB), sorted along the
+    // edge, but only if they form a complete open-edge chain from vA to vB
+    bool findChain(quint32 vA, quint32 vB, QVarLengthArray<quint32, 4> *chain) const
     {
-        const QVector3D d = p1 - p0;
+        const QVector3D p0 = positions[vA];
+        const QVector3D d = positions[vB] - p0;
         const float len2 = d.lengthSquared();
         const float len = std::sqrt(len2);
         const float tol = splitTolerance(len);
         if (len < (3 * tol)) // no room for an interior point
-            return { };
+            return false;
+
+        QVarLengthArray<std::pair<float, quint32>, 8> hits;
 
         const int steps = int(len / CellSize) + 1;
         for (int k = 0; k <= steps; ++k) {
@@ -129,72 +139,111 @@ struct CandidateGrid
                         auto it = grid.find(VertexWelder::cellKey(cx + dx, cy + dy, cz + dz));
                         if (it == grid.end())
                             continue;
-                        for (quint32 idx : it->second) {
-                            const QVector3D &c = points[idx];
+                        for (quint32 vid : it->second) {
+                            if ((vid == vA) || (vid == vB))
+                                continue;
+                            bool seen = false;
+                            for (const auto &hit : hits)
+                                seen = seen || (hit.second == vid);
+                            if (seen) // the grid walk can visit a cell more than once
+                                continue;
+                            const QVector3D &c = positions[vid];
                             const float t = QVector3D::dotProduct(c - p0, d) / len2;
                             if ((t <= 0.f) || (t >= 1.f))
                                 continue;
                             if ((c - (p0 + d * t)).lengthSquared() > (tol * tol))
                                 continue;
                             if (((c - p0).lengthSquared() <= (tol * tol))
-                                    || ((c - p1).lengthSquared() <= (tol * tol)))
+                                    || ((c - positions[vB]).lengthSquared() <= (tol * tol)))
                                 continue;
-                            return c;
+                            hits.append({ t, vid });
                         }
                     }
                 }
             }
         }
-        return { };
+        if (hits.isEmpty())
+            return false;
+        std::sort(hits.begin(), hits.end());
+
+        quint32 prev = vA;
+        for (const auto &hit : hits) {
+            if ((hit.second == prev) || !openEdges.contains(edgeKey(prev, hit.second)))
+                return false;
+            prev = hit.second;
+        }
+        if (!openEdges.contains(edgeKey(prev, vB)))
+            return false;
+
+        for (const auto &hit : hits)
+            chain->append(hit.second);
+        return true;
     }
 };
 
-// Recursively splits (a, b, c) at candidate points on its open edges and appends the
-// resulting triangles to out. openX flags edge (a,b) / (b,c) / (c,a); sub-edges of a split
-// edge stay open, the new diagonals are closed. The split vertex takes the exact candidate
-// position, so the later welding connects it with the other side of the seam.
-void emitSplitTriangles(const float *a, const float *b, const float *c,
-                        bool openA, bool openB, bool openC,
-                        int strideFloats, const CandidateGrid &candidates,
+// Splits the triangle along its open edges at verified T-junction chains and appends the
+// resulting fan triangles to out. The split vertices take the exact candidate positions,
+// so the later welding connects them with the other side of the seam.
+void emitSplitTriangles(const float *const rec[3], const quint32 vid[3], const bool open[3],
+                        int strideFloats, const TJunctionContext &ctx,
                         int depth, std::vector<float> &out)
 {
-    if (depth < 24) {
-        const float *v[3] = { a, b, c };
-        const bool open[3] = { openA, openB, openC };
-
+    if (depth < 4) { // each level consumes one of the (at most three) original open edges
         for (int e = 0; e < 3; ++e) {
             if (!open[e])
                 continue;
-            const float *e0 = v[e];
-            const float *e1 = v[(e + 1) % 3];
-            const float *opp = v[(e + 2) % 3];
-            const QVector3D p0(e0[0], e0[1], e0[2]);
-            const QVector3D p1(e1[0], e1[1], e1[2]);
 
-            const auto split = candidates.findOnEdge(p0, p1);
-            if (!split)
+            QVarLengthArray<quint32, 4> chain;
+            if (!ctx.findChain(vid[e], vid[(e + 1) % 3], &chain))
                 continue;
 
-            const QVector3D d = p1 - p0;
-            const float t = QVector3D::dotProduct(*split - p0, d) / d.lengthSquared();
+            const float *a = rec[e];
+            const float *b = rec[(e + 1) % 3];
+            const float *c = rec[(e + 2) % 3];
+            const QVector3D p0(a[0], a[1], a[2]);
+            const QVector3D d = QVector3D(b[0], b[1], b[2]) - p0;
+            const float len2 = d.lengthSquared();
 
-            float m[MaxStrideFloats];
-            for (int k = 0; k < strideFloats; ++k)
-                m[k] = e0[k] + ((e1[k] - e0[k]) * t);
-            m[0] = split->x();
-            m[1] = split->y();
-            m[2] = split->z();
+            // interpolated records for the chain points
+            QVarLengthArray<std::array<float, MaxStrideFloats>, 4> mids;
+            for (quint32 cv : chain) {
+                const QVector3D &cp = ctx.positions[cv];
+                const float t = QVector3D::dotProduct(cp - p0, d) / len2;
+                std::array<float, MaxStrideFloats> m;
+                for (int k = 0; k < strideFloats; ++k)
+                    m[size_t(k)] = a[k] + ((b[k] - a[k]) * t);
+                m[0] = cp.x();
+                m[1] = cp.y();
+                m[2] = cp.z();
+                mids.append(m);
+            }
 
-            emitSplitTriangles(e0, m, opp, open[e], false, open[(e + 2) % 3],
-                               strideFloats, candidates, depth + 1, out);
-            emitSplitTriangles(m, e1, opp, open[e], open[(e + 1) % 3], false,
-                               strideFloats, candidates, depth + 1, out);
+            QVarLengthArray<const float *, 6> fanRec;
+            QVarLengthArray<quint32, 6> fanVid;
+            fanRec.append(a);
+            fanVid.append(vid[e]);
+            for (int i = 0; i < chain.size(); ++i) {
+                fanRec.append(mids[i].data());
+                fanVid.append(chain[i]);
+            }
+            fanRec.append(b);
+            fanVid.append(vid[(e + 1) % 3]);
+
+            for (int i = 0; i < (fanRec.size() - 1); ++i) {
+                const float *prec[3] = { fanRec[i], fanRec[i + 1], c };
+                const quint32 pvid[3] = { fanVid[i], fanVid[i + 1], vid[(e + 2) % 3] };
+                // only the outermost fan triangles carry the remaining original open edges
+                const bool popen[3] = { false,
+                                        (i == (fanRec.size() - 2)) && open[(e + 1) % 3],
+                                        (i == 0) && open[(e + 2) % 3] };
+                emitSplitTriangles(prec, pvid, popen, strideFloats, ctx, depth + 1, out);
+            }
             return;
         }
     }
-    out.insert(out.end(), a, a + strideFloats);
-    out.insert(out.end(), b, b + strideFloats);
-    out.insert(out.end(), c, c + strideFloats);
+    out.insert(out.end(), rec[0], rec[0] + strideFloats);
+    out.insert(out.end(), rec[1], rec[1] + strideFloats);
+    out.insert(out.end(), rec[2], rec[2] + strideFloats);
 }
 
 // Where hi-res meets lo-res geometry (48 vs 16 sided primitives), the fine side's vertices
@@ -254,10 +303,10 @@ void splitTJunctions(const QList<SmoothBuffer> &buffers)
     if (openEdges.empty())
         return;
 
-    CandidateGrid candidates;
-    candidates.points.reserve(candidateVids.size());
+    TJunctionContext ctx { welder.positions, openEdges, { } };
+    ctx.grid.reserve(candidateVids.size());
     for (quint32 vid : candidateVids)
-        candidates.add(welder.positions[vid]);
+        ctx.addCandidate(vid);
 
     size_t cornerBase = 0;
     for (const auto &buffer : buffers) {
@@ -283,10 +332,12 @@ void splitTJunctions(const QList<SmoothBuffer> &buffers)
             }
 
             if (anyOpen) {
+                const float *rec[3] = { a, a + strideFloats, a + (2 * strideFloats) };
+                const quint32 vid[3] = { cornerVids[cornerBase + size_t(tri)],
+                                         cornerVids[cornerBase + size_t(tri) + 1],
+                                         cornerVids[cornerBase + size_t(tri) + 2] };
                 const size_t before = out.size();
-                emitSplitTriangles(a, a + strideFloats, a + (2 * strideFloats),
-                                   open[0], open[1], open[2],
-                                   strideFloats, candidates, 0, out);
+                emitSplitTriangles(rec, vid, open, strideFloats, ctx, 0, out);
                 changed = changed || (out.size() != (before + (3 * size_t(strideFloats))));
             } else {
                 out.insert(out.end(), a, a + (3 * strideFloats));
@@ -380,9 +431,12 @@ void smoothNormals(const QList<SmoothBuffer> &buffers, const QByteArray &lineBuf
     std::sort(edgeList.begin(), edgeList.end());
 
     // 16-gon primitives have 22.5 degree facets, so the fallback crease angle must stay
-    // above that; steeper smooth seams (e.g. lo-res primitives) are covered by their
-    // conditional lines
-    static constexpr float CosCreaseAngle = 0.8660254f; // cos(30 deg)
+    // above that. A type 5 conditional line widens the allowed angle (lo-res primitives
+    // have 45 degree facets), but must not force smoothness: partial cylinder primitives
+    // also carry condlines on their angular boundary edges, and those can end up on real
+    // corners (the wall-to-flat-side edges of 25269 measure 94 degrees).
+    static constexpr float CosCreaseAngle = 0.8660254f;         // cos(30 deg)
+    static constexpr float CosCondlineCreaseAngle = 0.5f;       // cos(60 deg)
 
     for (size_t i = 0; i < edgeList.size(); ) {
         size_t j = i + 1;
@@ -394,12 +448,13 @@ void smoothNormals(const QList<SmoothBuffer> &buffers, const QByteArray &lineBuf
             Face &f1 = faces[edgeList[i + 1].second / 4];
 
             bool smooth;
-            if (hardLines.contains(key))
+            if (hardLines.contains(key)) {
                 smooth = false;
-            else if (smoothLines.contains(key))
-                smooth = true;
-            else
-                smooth = (QVector3D::dotProduct(f0.normal, f1.normal) >= CosCreaseAngle);
+            } else {
+                const float cosAngle = QVector3D::dotProduct(f0.normal, f1.normal);
+                smooth = (cosAngle >= (smoothLines.contains(key) ? CosCondlineCreaseAngle
+                                                                 : CosCreaseAngle));
+            }
 
             if (smooth) {
                 f0.edgeSmooth[edgeList[i].second % 4] = true;
