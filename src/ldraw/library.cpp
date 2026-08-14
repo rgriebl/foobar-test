@@ -346,6 +346,10 @@ QCoro::Task<bool> Library::setPath(QString path, bool forceReload)
     }
 
     if (valid) {
+        // Preferring p/48 substitutes hi-res primitives everywhere. This opens small cracks
+        // (up to 0.5 LDU) in ~9% of all parts, whose geometry is hand-fitted to the 16-gon
+        // facets, but the much rounder look is worth it. LDView's primitive substitution has
+        // the same problem.
         static const std::array subdirs = { "LEGO", "Unofficial/p/48", "Unofficial/p", "p/48", "p",
                                            "Unofficial/parts", "parts", "models" };
 
