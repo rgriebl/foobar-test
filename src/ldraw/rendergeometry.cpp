@@ -8,10 +8,12 @@
 
 namespace LDraw {
 
-QmlRenderGeometry::QmlRenderGeometry(const BrickLink::Color *color, bool inheritsModelColor)
+QmlRenderGeometry::QmlRenderGeometry(const BrickLink::Color *color, bool inheritsModelColor,
+                                     bool twoSided)
     : QQuick3DGeometry()
     , m_color(color)
     , m_inheritsModelColor(inheritsModelColor)
+    , m_twoSided(twoSided)
 { }
 
 void QmlRenderGeometry::setModelColor(const BrickLink::Color *color, QQuick3DTextureData *textureData)

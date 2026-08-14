@@ -93,6 +93,14 @@ BfcCommandElement::BfcCommandElement(Private, const QString &text)
                 m_cw = true;
             else if (bfcCommand == u"CCW")
                 m_ccw = true;
+            else if (bfcCommand == u"CERTIFY")
+                m_certify = true;
+            else if (bfcCommand == u"NOCERTIFY")
+                m_nocertify = true;
+            else if (bfcCommand == u"CLIP")
+                m_clip = true;
+            else if (bfcCommand == u"NOCLIP")
+                m_noclip = true;
         }
     }
 }

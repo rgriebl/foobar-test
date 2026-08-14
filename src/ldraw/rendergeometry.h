@@ -28,20 +28,23 @@ class QmlRenderGeometry : public QQuick3DGeometry
     Q_PROPERTY(bool isChrome READ isChrome NOTIFY colorChanged FINAL)
     Q_PROPERTY(bool isMetallic READ isMetallic NOTIFY colorChanged FINAL)
     Q_PROPERTY(bool isPearl READ isPearl NOTIFY colorChanged FINAL)
+    Q_PROPERTY(bool isTwoSided READ isTwoSided CONSTANT FINAL)
     Q_PROPERTY(QQuick3DTextureData *textureData READ textureData NOTIFY colorChanged FINAL)
     Q_PROPERTY(QVector3D center READ center CONSTANT FINAL)
     Q_PROPERTY(float radius READ radius CONSTANT FINAL)
 
 public:
     // a surface built from LDraw color 16 inherits the model color: it is re-colored via
-    // setModelColor() instead of rebuilding the geometry
-    QmlRenderGeometry(const BrickLink::Color *color, bool inheritsModelColor);
+    // setModelColor() instead of rebuilding the geometry. twoSided surfaces (BFC uncertified
+    // or NOCLIP geometry) must not be back-face culled.
+    QmlRenderGeometry(const BrickLink::Color *color, bool inheritsModelColor, bool twoSided);
 
     QColor color() const        { return m_color->ldrawColor(); }
     float luminance() const     { return m_color->luminance(); }
     bool isChrome() const       { return m_color->isChrome() || (m_color->id() == 0); }
     bool isMetallic() const     { return m_color->isMetallic(); }
     bool isPearl() const        { return m_color->isPearl(); }
+    bool isTwoSided() const     { return m_twoSided; }
     QQuick3DTextureData *textureData() const     { return m_texture; }
     void setTextureData(QQuick3DTextureData *td) { m_texture = td; }
     QVector3D center() const                     { return m_center; }
@@ -62,6 +65,7 @@ private:
     QVector3D m_center;
     float m_radius = 0;
     bool m_inheritsModelColor = false;
+    bool m_twoSided = false;
 };
 
 class QmlRenderLineInstancing : public QQuick3DInstancing

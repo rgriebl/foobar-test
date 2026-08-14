@@ -213,15 +213,15 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
     RenderData rd;
     QVector3D center;
     float radius = 0;
-    QHash<const BrickLink::Color *, QByteArray> surfaceBuffers;
+    QHash<SurfaceKey, QByteArray> surfaceBuffers;
 
-    fillVertexBuffers(part.get(), nullptr, QMatrix4x4(), false, surfaceBuffers, rd.lineBuffer);
+    fillVertexBuffers(part.get(), nullptr, QMatrix4x4(), false, true, surfaceBuffers, rd.lineBuffer);
 
     if (smooth) {
         QList<SmoothBuffer> smoothBuffers;
         smoothBuffers.reserve(surfaceBuffers.size());
         for (auto it = surfaceBuffers.begin(); it != surfaceBuffers.end(); ++it)
-            smoothBuffers.append({ &it.value(), (3 + 3 + (needsUV(it.key()) ? 2 : 0)) * int(sizeof(float)) });
+            smoothBuffers.append({ &it.value(), (3 + 3 + (needsUV(it.key().first) ? 2 : 0)) * int(sizeof(float)) });
         smoothNormals(smoothBuffers, rd.lineBuffer);
     }
 
@@ -232,7 +232,7 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
         if (data.isEmpty())
             continue;
 
-        const BrickLink::Color *surfaceColor = it.key();
+        const BrickLink::Color *surfaceColor = it.key().first;
         const int stride = (3 + 3 + (needsUV(surfaceColor) ? 2 : 0)) * int(sizeof(float));
 
         generateMaterialTextureImage(surfaceColor); // pre-warm the cache off the GUI thread
@@ -260,7 +260,8 @@ RenderController::RenderData RenderController::calculateRenderData(const PartRef
         }
         surfaceRadius = std::sqrt(surfaceRadius);
 
-        rd.surfaces.emplace_back(surfaceColor, data, vmin, vmax, surfaceCenter, surfaceRadius);
+        rd.surfaces.emplace_back(surfaceColor, it.key().second, data, vmin, vmax, surfaceCenter,
+                                 surfaceRadius);
     }
 
     for (const auto &surface : std::as_const(rd.surfaces)) {
@@ -311,7 +312,7 @@ void RenderController::applyRenderData(RenderData &&data)
         const auto *color = inherits ? m_color : surface.color;
         const int stride = (3 + 3 + (needsUV(surface.color) ? 2 : 0)) * int(sizeof(float));
 
-        auto geo = std::make_unique<QmlRenderGeometry>(color, inherits);
+        auto geo = std::make_unique<QmlRenderGeometry>(color, inherits, surface.twoSided);
         geo->setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
         geo->setStride(stride);
         geo->addAttribute(QQuick3DGeometry::Attribute::PositionSemantic, 0, QQuick3DGeometry::Attribute::F32Type);
@@ -405,13 +406,16 @@ std::vector<std::pair<float, float>> RenderController::uvMapToNearestPlane(const
 }
 
 void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *baseColor,
-                                         const QMatrix4x4 &matrix, bool inverted,
-                                         QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
+                                         const QMatrix4x4 &matrix, bool inverted, bool cullingEnabled,
+                                         QHash<SurfaceKey, QByteArray> &surfaceBuffers,
                                          QByteArray &lineBuffer)
 {
     if (!part)
         return;
 
+    enum class Certification { Unknown, Certified, NotCertified };
+    Certification cert = Certification::Unknown;
+    bool localCull = true; // BFC CLIP / NOCLIP
     bool invertNext = false;
     bool ccw = true;
 
@@ -457,18 +461,34 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
         bool isBFCCommand = false;
         bool isBFCInvertNext = false;
 
+        // a file whose first operational line precedes any BFC statement is not certified
+        if ((cert == Certification::Unknown) && (e->type() != Element::Type::Comment)
+                && (e->type() != Element::Type::BfcCommand)) {
+            cert = Certification::NotCertified;
+        }
+
         switch (e->type()) {
         case Element::Type::BfcCommand: {
             const auto *be = static_cast<const BfcCommandElement *>(e);
+
+            // any BFC statement except NOCERTIFY implies CERTIFY
+            if (cert == Certification::Unknown)
+                cert = be->noCertify() ? Certification::NotCertified : Certification::Certified;
 
             if (be->invertNext()) {
                 invertNext = true;
                 isBFCInvertNext = true;
             }
+            if (be->certify() && !be->cw())
+                ccw = inverted; // plain CERTIFY implies CCW
             if (be->cw())
                 ccw = inverted ? false : true;
             if (be->ccw())
                 ccw = inverted ? true : false;
+            if (be->clip())
+                localCull = true;
+            if (be->noClip())
+                localCull = false;
 
             isBFCCommand = true;
             break;
@@ -476,6 +496,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
         case Element::Type::Triangle: {
             const auto te = static_cast<const TriangleElement *>(e);
             const auto color = mapColor(te->color());
+            const bool twoSided = !cullingEnabled || (cert != Certification::Certified) || !localCull;
             const auto p = te->points();
             const auto p0m = matrix.map(p[0]);
             const auto p1m = matrix.map(ccw ? p[2] : p[1]);
@@ -485,12 +506,12 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
             if (needsUV(color)) {
                 const auto uv = uvMapToNearestPlane(n, { p0m, p1m, p2m });
 
-                addFloatsToByteArray(surfaceBuffers[color], {
+                addFloatsToByteArray(surfaceBuffers[{ color, twoSided }], {
                     p0m.x(), p0m.y(), p0m.z(), n.x(), n.y(), n.z(), uv[0].first, uv[0].second,
                     p1m.x(), p1m.y(), p1m.z(), n.x(), n.y(), n.z(), uv[1].first, uv[1].second,
                     p2m.x(), p2m.y(), p2m.z(), n.x(), n.y(), n.z(), uv[2].first, uv[2].second });
             } else {
-                addFloatsToByteArray(surfaceBuffers[color], {
+                addFloatsToByteArray(surfaceBuffers[{ color, twoSided }], {
                     p0m.x(), p0m.y(), p0m.z(), n.x(), n.y(), n.z(),
                     p1m.x(), p1m.y(), p1m.z(), n.x(), n.y(), n.z(),
                     p2m.x(), p2m.y(), p2m.z(), n.x(), n.y(), n.z() });
@@ -500,6 +521,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
         case Element::Type::Quad: {
             const auto qe = static_cast<const QuadElement *>(e);
             const auto color = mapColor(qe->color());
+            const bool twoSided = !cullingEnabled || (cert != Certification::Certified) || !localCull;
             const auto p = qe->points();
             const auto p0m = matrix.map(p[0]);
             const auto p1m = matrix.map(ccw ? p[3] : p[1]);
@@ -510,7 +532,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
             if (needsUV(color)) {
                 const auto uv = uvMapToNearestPlane(n, { p0m, p1m, p2m, p3m });
 
-                addFloatsToByteArray(surfaceBuffers[color], {
+                addFloatsToByteArray(surfaceBuffers[{ color, twoSided }], {
                     p0m.x(), p0m.y(), p0m.z(), n.x(), n.y(), n.z(), uv[0].first, uv[0].second,
                     p1m.x(), p1m.y(), p1m.z(), n.x(), n.y(), n.z(), uv[1].first, uv[1].second,
                     p2m.x(), p2m.y(), p2m.z(), n.x(), n.y(), n.z(), uv[2].first, uv[2].second,
@@ -518,7 +540,7 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
                     p3m.x(), p3m.y(), p3m.z(), n.x(), n.y(), n.z(), uv[3].first, uv[3].second,
                     p0m.x(), p0m.y(), p0m.z(), n.x(), n.y(), n.z(), uv[0].first, uv[0].second });
             } else {
-                addFloatsToByteArray(surfaceBuffers[color], {
+                addFloatsToByteArray(surfaceBuffers[{ color, twoSided }], {
                     p0m.x(), p0m.y(), p0m.z(), n.x(), n.y(), n.z(),
                     p1m.x(), p1m.y(), p1m.z(), n.x(), n.y(), n.z(),
                     p2m.x(), p2m.y(), p2m.z(), n.x(), n.y(), n.z(),
@@ -553,14 +575,17 @@ void RenderController::fillVertexBuffers(Part *part, const BrickLink::Color *bas
             bool matrixReversed = (pe->matrix().determinant() < 0);
 
             fillVertexBuffers(pe->part().get(), mapColor(pe->color()), matrix * pe->matrix(),
-                              inverted ^ invertNext ^ matrixReversed, surfaceBuffers, lineBuffer);
+                              inverted ^ invertNext ^ matrixReversed,
+                              cullingEnabled && (cert == Certification::Certified) && localCull,
+                              surfaceBuffers, lineBuffer);
             break;
         }
         default:
             break;
         }
 
-        if (!isBFCCommand || !isBFCInvertNext)
+        // INVERTNEXT survives intervening comments and applies to the next type 1 line
+        if ((e->type() != Element::Type::Comment) && (!isBFCCommand || !isBFCInvertNext))
             invertNext = false;
     }
 }

@@ -171,6 +171,7 @@ Item {
                         property bool isChrome     : model.modelData && model.modelData.isChrome
                         property bool isMetallic   : model.modelData && model.modelData.isMetallic
                         property bool isPearl      : model.modelData && model.modelData.isPearl
+                        property bool isTwoSided   : model.modelData && model.modelData.isTwoSided
                         property bool isTransparent: (color.a < 1)
                         property var textureData   : model.modelData ? model.modelData.textureData : null
 
@@ -181,7 +182,7 @@ Item {
                         baseColorMap: textureData ? texture : null
                         baseColor   : textureData ? "white" : color
 
-                        cullMode     : isTransparent ? Material.NoCulling          : Material.BackFaceCulling
+                        cullMode     : (isTransparent || isTwoSided) ? Material.NoCulling : Material.BackFaceCulling
                         depthDrawMode: isTransparent ? Material.NeverDepthDraw     : Material.AlwaysDepthDraw
                         alphaMode    : isTransparent ? PrincipledMaterial.Blend    : PrincipledMaterial.Opaque
                         //blendMode    : isTransparent ? PrincipledMaterial.Multiply : PrincipledMaterial.SourceOver

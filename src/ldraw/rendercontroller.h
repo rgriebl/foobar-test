@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <utility>
 #include <vector>
 
 #include <QtCore/QObject>
@@ -90,12 +91,17 @@ signals:
     void edgeColorChanged(const QColor &edgeColor);
 
 private:
+    // surface bucket key: authored color (nullptr = LDraw color 16) plus "render two-sided"
+    // (geometry from BFC uncertified or NOCLIP scopes must not be back-face culled)
+    using SurfaceKey = std::pair<const BrickLink::Color *, bool>;
+
     // calculated on a worker thread, so plain data only. The data is color-independent:
     // LDraw color 16 surfaces (color == nullptr) and color 24 lines are resolved against the
     // current model color at material level, so a color change needs no rebuild.
     struct RenderData {
         struct Surface {
             const BrickLink::Color *color = nullptr; // nullptr: inherits the model color
+            bool twoSided = false;
             QByteArray vertexData;
             QVector3D boundsMin;
             QVector3D boundsMax;
@@ -116,10 +122,12 @@ private:
     void applyRenderData(RenderData &&data);
     void updateSurfaceColors();
 
-    // baseColor == nullptr means "inherits the model color" (LDraw color 16)
+    // baseColor == nullptr means "inherits the model color" (LDraw color 16); cullingEnabled
+    // is the accumulated BFC state of the reference chain (false once any ancestor was
+    // uncertified or stopped clipping)
     static void fillVertexBuffers(Part *part, const BrickLink::Color *baseColor,
-                                  const QMatrix4x4 &matrix, bool inverted,
-                                  QHash<const BrickLink::Color *, QByteArray> &surfaceBuffers,
+                                  const QMatrix4x4 &matrix, bool inverted, bool cullingEnabled,
+                                  QHash<SurfaceKey, QByteArray> &surfaceBuffers,
                                   QByteArray &lineBuffer);
     static QImage generateMaterialTextureImage(const BrickLink::Color *color);
     static QQuick3DTextureData *createTextureData(const BrickLink::Color *color, QmlRenderGeometry *geo);
