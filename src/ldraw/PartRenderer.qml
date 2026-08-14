@@ -226,13 +226,12 @@ Item {
             }
         }
 
-        Timer {
+        FrameAnimation {
             id: animation
             running: root.renderController.tumblingAnimationActive
-            repeat: true
-            interval: 16
             onTriggered: {
-                rootNode.rotate(RenderSettings.tumblingAnimationAngle,
+                // tumblingAnimationAngle is per 60 Hz tick
+                rootNode.rotate(RenderSettings.tumblingAnimationAngle * frameTime * 60,
                                 RenderSettings.tumblingAnimationAxis, Node.LocalSpace)
             }
         }

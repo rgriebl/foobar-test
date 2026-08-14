@@ -10,10 +10,12 @@ VARYING vec4 col;
 void MAIN()
 {
     vec3 position = VERTEX;
+    // the qt_instanceTransform0-2 rows have no documented keyword (INSTANCE_MODEL_MATRIX
+    // composes them); their layout is frozen by the public InstanceTableEntry struct
     vec3 p0 = qt_instanceTransform0.xyz;
     vec3 p1 = qt_instanceTransform1.xyz;
     vec3 p2 = qt_instanceTransform2.xyz;
-    vec3 p3 = qt_instanceData.xyz;
+    vec3 p3 = INSTANCE_DATA.xyz;
 
     mat4 mvp = qt_viewProjectionMatrix * qt_parentMatrix * qt_modelMatrix;
 
@@ -26,7 +28,7 @@ void MAIN()
     vec2 screen1 = resolution * (0.5 * clip1.xy / clip1.w + 0.5);
 
     // Now check for conditional lines
-    if (qt_instanceData.w > 0) {
+    if (INSTANCE_DATA.w > 0.0) {
         vec4 clip2 = mvp * vec4(p2, 1.0);
         vec4 clip3 = mvp * vec4(p3, 1.0);
         vec2 screen2 = resolution * (0.5 * clip2.xy / clip2.w + 0.5);
@@ -63,7 +65,6 @@ void MAIN()
 
 
     clip.z -= customLineWidth * sqrt(2) / resolution.x;
-    clip = normalize(clip);
 
     // Now we'll recover our final position by converting our vertex back into clip space.
     // Note we're undoing the perspective divide we performed earlier:
