@@ -30,7 +30,7 @@ def download(url, file):
 
     if response.status_code != 200:
         sys.exit("Failed to download {}".format(url))
-  
+
     total = int(response.headers.get('content-length', 0))
     blockSize = 1024
     progressBar = tqdm(total=total, unit='iB', unit_scale=True, file=sys.stdout)
@@ -86,7 +86,7 @@ def scanStudioUnOfficial(dir):
                         partsmap[blid] = id
                     else:
                         partsmap[blid] = None
-            
+
                     # make sure to not use the file id directly (unless something
                     # else maps to it: e.g. a->b and b->a)
                     if not id in partsmap or partsmap[id] == id:
@@ -99,7 +99,7 @@ def downloadAndUnpack(tempDir):
 
     ldrawFile = "ldraw.zip"
     studioFile = "studio.pkg"
-  
+
     print("Downloading LDraw...")
     download(ldrawUrl, tempDir + '/' + ldrawFile)
     print("Downloading Studio...")
@@ -118,20 +118,24 @@ def downloadAndUnpack(tempDir):
         os.remove(f)
 
     print("Unpacking Studio (stage 1)...")
-    cp = subprocess.run(['7z', 'x', studioFile, 'Payload~'],
+    cp = subprocess.run(['7z', 'x', studioFile, 'Studio_component.pkg/Payload'],
                         cwd=tempDir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if cp.returncode != 0:
         sys.exit(cp.stdout)
-
-    studioLDrawDir = 'Applications/Studio 2.0/ldraw'
 
     print("Unpacking Studio (stage 2)...")
-    cp = subprocess.run(['7z', 'x', 'Payload~', './' + studioLDrawDir + '/UnOfficial', '-r'],
+    cp = subprocess.run(['7z', 'x', 'Studio_component.pkg/Payload', 'Payload~'],
                         cwd=tempDir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if cp.returncode != 0:
         sys.exit(cp.stdout)
 
-    return "ldraw", studioLDrawDir
+    print("Unpacking Studio (stage 3)...")
+    cp = subprocess.run(['7z', 'x', 'Payload~', './ldraw/UnOfficial', '-r', '-ostudio'],
+                        cwd=tempDir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if cp.returncode != 0:
+        sys.exit(cp.stdout)
+
+    return "ldraw", "studio/ldraw"
 
 
 def main():
@@ -146,7 +150,7 @@ def main():
     args = parser.parse_args()
 
     additionalFiles = []
-  
+
     for additional in args.additional:
         if os.path.isdir(additional):
             additionalFiles.extend(sorted(glob.glob(additional + '/*.yaml')))
@@ -157,7 +161,7 @@ def main():
         print("Loading additional mapping file", additionalFile, "...")
         with open(additionalFile, 'r') as fp:
             mapping = yaml.safe_load(fp)
-            print("  found", len(mapping), "mappings.")
+            print("  loaded", len(mapping), "mappings.")
             additionalMaps.append(mapping)
 
     with tempfile.TemporaryDirectory(dir=args.temp_base_dir) as tempDir:
@@ -165,24 +169,26 @@ def main():
 
         print("Scanning ldraw library at", ldrawDir, "...")
         scanOfficial(tempDir + '/' + ldrawDir)
+        print("  now at", len(partsmap), "total mappings.")
+
         print("Scanning Studio unofficial parts at", studioDir, "...")
         scanStudioUnOfficial(tempDir + '/' + studioDir)
+        print("  now at", len(partsmap), "total mappings.")
 
-        print("  found", len(partsmap), "mappings.")
-
-        print("Mergeing mappings...")
+        print("Merging additional mappings...")
         for mapping in additionalMaps:
             partsmap.update(mapping)
+        print("  now at", len(partsmap), "total mappings.")
 
         # make the output a bit more readable
         partsmap = { key: partsmap[key] for key in sorted(partsmap) }
 
         mappingFile = "brickstore-mappings.cbor"
-  
+
         print("Writing mappings to", mappingFile, "...")
         with open(tempDir + '/' +  ldrawDir + '/' + mappingFile, 'wb') as fp:
             cbor2.dump(partsmap, fp)
-      
+
         ldrawZipFile = ldrawDir + '-mod.zip'
 
         print("Creating ldraw-mod.zip...")
