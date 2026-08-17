@@ -16,22 +16,22 @@ class RenderSettings : public QObject
     Q_OBJECT
     QML_NAMED_ELEMENT(RenderSettings)
     QML_SINGLETON
-    Q_PROPERTY(QQuaternion defaultRotation MEMBER m_defaultRotation NOTIFY defaultRotationChanged FINAL)
-    Q_PROPERTY(bool orthographicCamera MEMBER m_orthographicCamera NOTIFY orthographicCameraChanged FINAL)
-    Q_PROPERTY(bool lighting MEMBER m_lighting NOTIFY lightingChanged FINAL)
+    Q_PROPERTY(QQuaternion defaultRotation MEMBER m_defaultRotation CONSTANT FINAL)
+    Q_PROPERTY(float fieldOfView MEMBER m_fieldOfView CONSTANT FINAL)
+    Q_PROPERTY(bool showBoundingSpheres MEMBER m_showBoundingSpheres CONSTANT FINAL)
+    Q_PROPERTY(float tumblingAnimationAngle MEMBER m_tumblingAnimationAngle CONSTANT FINAL)
+    Q_PROPERTY(QVector3D tumblingAnimationAxis MEMBER m_tumblingAnimationAxis CONSTANT FINAL)
+
+    Q_PROPERTY(int antiAliasing MEMBER m_antiAliasing NOTIFY antiAliasingChanged FINAL)
+    Q_PROPERTY(bool smoothNormals MEMBER m_smoothNormals NOTIFY smoothNormalsChanged FINAL)
     Q_PROPERTY(bool renderLines MEMBER m_renderLines NOTIFY renderLinesChanged FINAL)
     Q_PROPERTY(float lineThickness MEMBER m_lineThickness NOTIFY lineThicknessChanged FINAL)
-    Q_PROPERTY(bool smoothNormals MEMBER m_smoothNormals NOTIFY smoothNormalsChanged FINAL)
-    Q_PROPERTY(bool showBoundingSpheres MEMBER m_showBoundingSpheres NOTIFY showBoundingSpheresChanged FINAL)
-    Q_PROPERTY(float tumblingAnimationAngle MEMBER m_tumblingAnimationAngle NOTIFY tumblingAnimationAngleChanged FINAL)
-    Q_PROPERTY(QVector3D tumblingAnimationAxis MEMBER m_tumblingAnimationAxis NOTIFY tumblingAnimationAxisChanged FINAL)
-    Q_PROPERTY(float fieldOfView MEMBER m_fieldOfView NOTIFY fieldOfViewChanged FINAL)
-    Q_PROPERTY(int antiAliasing MEMBER m_antiAliasing NOTIFY antiAliasingChanged FINAL)
 
+    Q_PROPERTY(bool lighting MEMBER m_lighting NOTIFY lightingChanged FINAL)
+    Q_PROPERTY(float additionalLight MEMBER m_additionalLight NOTIFY additionalLightChanged FINAL)
     Q_PROPERTY(float aoStrength MEMBER m_aoStrength NOTIFY aoStrengthChanged FINAL)
     Q_PROPERTY(float aoDistance MEMBER m_aoDistance NOTIFY aoDistanceChanged FINAL)
     Q_PROPERTY(float aoSoftness MEMBER m_aoSoftness NOTIFY aoSoftnessChanged FINAL)
-    Q_PROPERTY(float additionalLight MEMBER m_additionalLight NOTIFY additionalLightChanged FINAL)
 
     Q_PROPERTY(float plainMetalness MEMBER m_plainMetalness NOTIFY plainMetalnessChanged FINAL)
     Q_PROPERTY(float plainRoughness MEMBER m_plainRoughness NOTIFY plainRoughnessChanged FINAL)
@@ -54,32 +54,24 @@ public:
     };
     Q_ENUM(AntiAliasing)
 
-public:
-    bool smoothNormals() const  { return m_smoothNormals; }
+  public:
+    bool smoothNormals() const;
 
     void save();
     void load();
     void resetToDefaults();
 
-    QVariantMap propertyDefaultValues() const;
-
 signals:
-    void defaultRotationChanged(const QQuaternion &newDefaultRotation);
-    void orthographicCameraChanged(bool newOrthographicCamera);
-    void lightingChanged(bool newLighting);
+    void antiAliasingChanged(int newAntiAliasing);
+    void smoothNormalsChanged(bool newSmoothNormals);
     void renderLinesChanged(bool newRenderLines);
     void lineThicknessChanged(float newLineThickness);
-    void smoothNormalsChanged(bool newSmoothNormals);
-    void showBoundingSpheresChanged(bool newShowBoundingSpheres);
-    void tumblingAnimationAngleChanged(float newTumblingAnimationAngle);
-    void tumblingAnimationAxisChanged(const QVector3D &newTumblingAnimationAxis);
-    void fieldOfViewChanged(float newFieldOfView);
-    void antiAliasingChanged(int newAntiAliasing);
 
+    void lightingChanged(bool newLighting);
+    void additionalLightChanged(float newAdditionalLight);
     void aoStrengthChanged(float newAoStrength);
     void aoDistanceChanged(float newAoDistance);
     void aoSoftnessChanged(float newAoSoftness);
-    void additionalLightChanged(float newAdditionalLight);
 
     void plainMetalnessChanged(float newPlainMetalness);
     void plainRoughnessChanged(float newPlainRoughness);
@@ -93,25 +85,27 @@ signals:
 private:
     RenderSettings();
     static RenderSettings *s_inst;
-    void setToDefault();
+    QVariantMap propertyDefaultValues() const;
     void forEachProperty(const std::function<void (QMetaProperty &)> &callback);
 
-    QQuaternion m_defaultRotation { };
-    bool m_orthographicCamera { };
-    bool m_lighting { };
+    // fixed values
+    QQuaternion m_defaultRotation     = QQuaternion::fromEulerAngles(-24, -138, 160);
+    float m_fieldOfView               = 40.f;
+    bool m_showBoundingSpheres        = false;
+    float m_tumblingAnimationAngle    = 0.1f;
+    QVector3D m_tumblingAnimationAxis = { 0.5f, 0.375f, 0.25f };
+
+    // user-configurable values
+    int m_antiAliasing { };
+    bool m_smoothNormals { };
     bool m_renderLines { };
     float m_lineThickness { };
-    bool m_smoothNormals { };
-    bool m_showBoundingSpheres { };
-    float m_tumblingAnimationAngle { };
-    QVector3D m_tumblingAnimationAxis { };
-    float m_fieldOfView { };
-    int m_antiAliasing { };
 
+    bool m_lighting { };
+    float m_additionalLight { };
     float m_aoStrength { };
     float m_aoSoftness { };
     float m_aoDistance { };
-    float m_additionalLight { };
 
     float m_plainMetalness { };
     float m_plainRoughness { };

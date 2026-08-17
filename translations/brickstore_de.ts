@@ -1199,7 +1199,7 @@
         <translation>Höchstwahrscheinlich ist der Zugriffstoken abgelaufen: &lt;i&gt;Wiederholen&lt;/i&gt; öffnet die Einstellungen um ihn zu erneuern.</translation>
     </message>
     <message>
-        <location line="+409"/>
+        <location line="+411"/>
         <source>No valid BrickLink access token found.&lt;br /&gt;&lt;br /&gt;Do you want to change the settings now?</source>
         <translation>Kein gültiger BrickLink Zugriffstoken&quot; vorhanden.&lt;br /&gt;&lt;br /&gt;Wollen Sie diese Einstellungen jetzt ändern?</translation>
     </message>
@@ -5035,32 +5035,27 @@ Rechts-Click: Menü</translation>
         <translation>Allgemein</translation>
     </message>
     <message>
-        <location line="+9"/>
         <source>Camera</source>
-        <translation>Kamera</translation>
+        <translation type="vanished">Kamera</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Orthographic</source>
-        <translation>Orthografisch</translation>
+        <translation type="vanished">Orthografisch</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Perspective</source>
-        <translation>Perspektivisch</translation>
+        <translation type="vanished">Perspektivisch</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source>Field of view</source>
-        <translation>Sichtfeld</translation>
+        <translation type="vanished">Sichtfeld</translation>
     </message>
     <message>
-        <location line="+23"/>
         <source> °</source>
-        <translation> °</translation>
+        <translation type="vanished"> °</translation>
     </message>
     <message>
-        <location line="+21"/>
+        <location line="+54"/>
         <source>Lines</source>
         <translation>Linien</translation>
     </message>
@@ -5080,27 +5075,23 @@ Rechts-Click: Menü</translation>
         <translation> px</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Animation</source>
-        <translation>Animation</translation>
+        <translation type="vanished">Animation</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source> ° / tick</source>
-        <translation> ° / tick</translation>
+        <translation type="vanished"> ° / tick</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Debug</source>
-        <translation>Debug</translation>
+        <translation type="vanished">Debug</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Show bounding spheres</source>
-        <translation>Zeige Hüllkugeln</translation>
+        <translation type="vanished">Zeige Hüllkugeln</translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="-87"/>
         <source>Anti-Aliasing</source>
         <translation>Kantenglättung</translation>
     </message>
@@ -5125,7 +5116,17 @@ Rechts-Click: Menü</translation>
         <translation>Sehr hoch</translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+8"/>
+        <source>Surfaces</source>
+        <translation>Flächen</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Smoothly curved</source>
+        <translation>Sanft gekrümmt</translation>
+    </message>
+    <message>
+        <location line="+81"/>
         <source>Lighting</source>
         <translation>Beleuchtung</translation>
     </message>

@@ -1195,7 +1195,7 @@
         <translation>Lo más probable es que su token haya caducado: puede pulsar &lt;i&gt;Reintentar&lt;/i&gt; para abrir las Opciones y renovarlo.</translation>
     </message>
     <message>
-        <location line="+409"/>
+        <location line="+411"/>
         <source>No valid BrickLink access token found.&lt;br /&gt;&lt;br /&gt;Do you want to change the settings now?</source>
         <translation>No se ha encontrado ningún token de acceso a BrickLink válido.&lt;br /&gt;&lt;br /&gt;¿Quiere cambiar estos ajustes ahora?</translation>
     </message>
@@ -5019,32 +5019,27 @@ Clic derecho: Menu</translation>
         <translation>General</translation>
     </message>
     <message>
-        <location line="+9"/>
         <source>Camera</source>
-        <translation>Cámara</translation>
+        <translation type="vanished">Cámara</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Orthographic</source>
-        <translation>Ortográfica</translation>
+        <translation type="vanished">Ortográfica</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Perspective</source>
-        <translation>Perspectiva</translation>
+        <translation type="vanished">Perspectiva</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source>Field of view</source>
-        <translation>Campo de visión</translation>
+        <translation type="vanished">Campo de visión</translation>
     </message>
     <message>
-        <location line="+23"/>
         <source> °</source>
-        <translation> °</translation>
+        <translation type="vanished"> °</translation>
     </message>
     <message>
-        <location line="+21"/>
+        <location line="+54"/>
         <source>Lines</source>
         <translation>Líneas</translation>
     </message>
@@ -5064,27 +5059,23 @@ Clic derecho: Menu</translation>
         <translation> px</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Animation</source>
-        <translation>Animación</translation>
+        <translation type="vanished">Animación</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source> ° / tick</source>
-        <translation> ° / marca</translation>
+        <translation type="vanished"> ° / marca</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Debug</source>
-        <translation>Depurar</translation>
+        <translation type="vanished">Depurar</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Show bounding spheres</source>
-        <translation>Mostrar esferas delimitadoras</translation>
+        <translation type="vanished">Mostrar esferas delimitadoras</translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="-87"/>
         <source>Anti-Aliasing</source>
         <translation>Suavizado de Bordes</translation>
     </message>
@@ -5109,7 +5100,17 @@ Clic derecho: Menu</translation>
         <translation>Muy alto</translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+8"/>
+        <source>Surfaces</source>
+        <translation>Superficies</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Smoothly curved</source>
+        <translation>Suavemente curvadas</translation>
+    </message>
+    <message>
+        <location line="+81"/>
         <source>Lighting</source>
         <translation>Iluminación</translation>
     </message>

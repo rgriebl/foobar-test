@@ -1195,7 +1195,7 @@
         <translation>Troligtvis har din token gått ut: du kan klicka på &lt;i&gt;Försök igen&lt;/i&gt; för att öppna Inställningar och förnya den.</translation>
     </message>
     <message>
-        <location line="+409"/>
+        <location line="+411"/>
         <source>No valid BrickLink access token found.&lt;br /&gt;&lt;br /&gt;Do you want to change the settings now?</source>
         <translation>Ingen giltig BrickLink åtkomsttoken hittades.&lt;br /&gt;&lt;br /&gt;Vill du ändra dessa inställningar nu?</translation>
     </message>
@@ -5013,7 +5013,7 @@ Högerklicka: Meny</translation>
     <message>
         <location filename="../src/desktop/rendersettingsdialog.ui" line="+14"/>
         <source>3D Render Settings</source>
-        <translation>3D Renderings inställningar</translation>
+        <translation>3D-renderingsinställningar</translation>
     </message>
     <message>
         <location line="+13"/>
@@ -5021,32 +5021,23 @@ Högerklicka: Meny</translation>
         <translation>Allmänt</translation>
     </message>
     <message>
-        <location line="+9"/>
         <source>Camera</source>
-        <translation>Kamera</translation>
+        <translation type="vanished">Kamera</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Orthographic</source>
-        <translation>Ortografisk</translation>
+        <translation type="vanished">Ortografisk</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Perspective</source>
-        <translation>Perspektiv</translation>
+        <translation type="vanished">Perspektiv</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source>Field of view</source>
-        <translation>Synfält</translation>
+        <translation type="vanished">Synfält</translation>
     </message>
     <message>
-        <location line="+23"/>
-        <source> °</source>
-        <translation></translation>
-    </message>
-    <message>
-        <location line="+21"/>
+        <location line="+54"/>
         <source>Lines</source>
         <translation>Linjer</translation>
     </message>
@@ -5063,32 +5054,24 @@ Högerklicka: Meny</translation>
     <message>
         <location line="+28"/>
         <source> px</source>
-        <translation></translation>
+        <translation> px</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Animation</source>
-        <translation>Animering</translation>
+        <translation type="vanished">Animering</translation>
     </message>
     <message>
-        <location line="+28"/>
-        <source> ° / tick</source>
-        <translation></translation>
-    </message>
-    <message>
-        <location line="+15"/>
         <source>Debug</source>
-        <translation>Felsöka</translation>
+        <translation type="vanished">Felsöka</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Show bounding spheres</source>
-        <translation>Visa avgränsade sfärer</translation>
+        <translation type="vanished">Visa avgränsade sfärer</translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="-87"/>
         <source>Anti-Aliasing</source>
-        <translation></translation>
+        <translation>Kantutjämning</translation>
     </message>
     <message>
         <location line="+8"/>
@@ -5108,22 +5091,32 @@ Högerklicka: Meny</translation>
     <message>
         <location line="+5"/>
         <source>Very high</source>
-        <translation>Väldigt högt</translation>
+        <translation>Mycket hög</translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+8"/>
+        <source>Surfaces</source>
+        <translation>Ytor</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Smoothly curved</source>
+        <translation>Mjukt böjda</translation>
+    </message>
+    <message>
+        <location line="+81"/>
         <source>Lighting</source>
-        <translation>Blixt</translation>
+        <translation>Belysning</translation>
     </message>
     <message>
         <location line="+11"/>
         <source>Enable</source>
-        <translation>Aktiverad</translation>
+        <translation>Aktivera</translation>
     </message>
     <message>
         <location line="+7"/>
         <source>Realistic Lighting</source>
-        <translation>Realistisk blixt</translation>
+        <translation>Realistisk belysning</translation>
     </message>
     <message>
         <location line="+7"/>
@@ -5133,7 +5126,7 @@ Högerklicka: Meny</translation>
     <message>
         <location line="+45"/>
         <source>Ambient Occlusion</source>
-        <translation></translation>
+        <translation>Ambient ocklusion</translation>
     </message>
     <message>
         <location line="+6"/>
@@ -5148,7 +5141,7 @@ Högerklicka: Meny</translation>
     <message>
         <location line="+23"/>
         <source>Distance</source>
-        <translation>Distans</translation>
+        <translation>Avstånd</translation>
     </message>
     <message>
         <location line="+70"/>
@@ -5168,7 +5161,7 @@ Högerklicka: Meny</translation>
     <message>
         <location line="+7"/>
         <source>Roughness</source>
-        <translation>Hårdhet</translation>
+        <translation>Ojämnhet</translation>
     </message>
     <message>
         <location line="+7"/>
@@ -5188,7 +5181,7 @@ Högerklicka: Meny</translation>
     <message>
         <location line="+39"/>
         <source>Pearl</source>
-        <translation>Pärlig</translation>
+        <translation>Pärlglans</translation>
     </message>
 </context>
 <context>

@@ -1,7 +1,8 @@
 // Copyright (C) 2004-2026 Robert Griebl
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include <QSignalMapper>
+#include <QMetaMethod>
+#include <QMetaProperty>
 
 #include "ldraw/rendersettings.h"
 #include "rendersettingsdialog.h"
@@ -17,10 +18,12 @@ RenderSettingsDialog::RenderSettingsDialog()
 {
     ui->setupUi(this);
 
-    connectSliderAndSpinBox(ui->animationAngleSlider, ui->animationAngle, "tumblingAnimationAngle");
-    connectSliderAndSpinBox(ui->lineWidthSlider,      ui->lineWidth,      "lineThickness", 10);
-    connectSliderAndSpinBox(ui->fieldOfViewSlider,    ui->fieldOfView,    "fieldOfView", 1);
+    connectComboBox(ui->antiAliasing, "antiAliasing");
+    connectToggleButton(ui->smoothNormals, "smoothNormals");
+    connectToggleButton(ui->showLines, "renderLines");
+    connectSliderAndSpinBox(ui->lineWidthSlider,  ui->lineWidth, "lineThickness", 10);
 
+    connectToggleButton(ui->enableLighting, "lighting");
     connectSliderAndSpinBox(ui->brightnessSlider, ui->brightness, "additionalLight");
     connectSliderAndSpinBox(ui->aoStrengthSlider, ui->aoStrength, "aoStrength");
     connectSliderAndSpinBox(ui->aoSoftnessSlider, ui->aoSoftness, "aoSoftness");
@@ -34,14 +37,6 @@ RenderSettingsDialog::RenderSettingsDialog()
     connectSliderAndSpinBox(ui->metallicRoughnessSlider, ui->metallicRoughness, "metallicRoughness");
     connectSliderAndSpinBox(ui->pearlMetalnessSlider,    ui->pearlMetalness,    "pearlMetalness");
     connectSliderAndSpinBox(ui->pearlRoughnessSlider,    ui->pearlRoughness,    "pearlRoughness");
-
-    connectToggleButton(ui->orthographicCamera,  "orthographicCamera");
-    connectToggleButton(ui->smoothNormals,       "smoothNormals");
-    connectToggleButton(ui->showLines,           "renderLines");
-    connectToggleButton(ui->showBoundingSpheres, "showBoundingSpheres");
-    connectToggleButton(ui->enableLighting,      "lighting");
-
-    connectComboBox(ui->antiAliasing,  "antiAliasing");
 
     connect(ui->buttonBox, &QDialogButtonBox::clicked,
             this, [this](QAbstractButton *button) {
@@ -81,17 +76,9 @@ void RenderSettingsDialog::connectToggleButton(QAbstractButton *checkBox, const 
         rs->setProperty(propName, b);
     });
 
-    auto setter = [=]() {
+    updateOnChange(propName, [=]() {
         checkBox->setChecked(rs->property(propName).toBool());
-    };
-
-    auto dummyMapper = new QSignalMapper(checkBox);
-    QByteArray chgSig = "2" + propName + "Changed(bool)";
-    connect(rs, chgSig.constData(), dummyMapper, SLOT(map()));
-    dummyMapper->setMapping(rs, 42);
-    connect(dummyMapper, &QSignalMapper::mappedInt, this, setter);
-
-    setter();
+    });
 }
 
 void RenderSettingsDialog::connectComboBox(QComboBox *comboBox, const QByteArray &propName)
@@ -103,17 +90,9 @@ void RenderSettingsDialog::connectComboBox(QComboBox *comboBox, const QByteArray
         rs->setProperty(propName, i);
     });
 
-    auto setter = [=]() {
+    updateOnChange(propName, [=]() {
         comboBox->setCurrentIndex(rs->property(propName).toInt());
-    };
-
-    auto dummyMapper = new QSignalMapper(comboBox);
-    QByteArray chgSig = "2" + propName + "Changed(int)";
-    connect(rs, chgSig.constData(), dummyMapper, SLOT(map()));
-    dummyMapper->setMapping(rs, 42);
-    connect(dummyMapper, &QSignalMapper::mappedInt, this, setter);
-
-    setter();
+    });
 }
 
 void RenderSettingsDialog::connectSliderAndSpinBox(QSlider *slider, QDoubleSpinBox *spinBox,
@@ -136,15 +115,36 @@ void RenderSettingsDialog::connectSliderAndSpinBox(QSlider *slider, QDoubleSpinB
         rs->setProperty(propName, v);
     });
 
-    auto setter = [=]() {
+    updateOnChange(propName, [=]() {
         spinBox->setValue(rs->property(propName).toDouble());
-    };
-
-    auto dummyMapper = new QSignalMapper(spinBox);
-    QByteArray chgSig = "2" + propName + "Changed(float)";
-    connect(rs, chgSig.constData(), dummyMapper, SLOT(map()));
-    dummyMapper->setMapping(rs, 42);
-    connect(dummyMapper, &QSignalMapper::mappedInt, this, setter);
-
-    setter();
+    });
 }
+
+void RenderSettingsDialog::updateOnChange(const QByteArray &propName, const std::function<void()> &updateUi)
+{
+    auto rs = LDraw::RenderSettings::inst();
+    const QMetaObject *rsmo = rs->metaObject();
+    const int propIndex = rsmo->indexOfProperty(propName.constData());
+    Q_ASSERT(propIndex >= 0);
+    const QMetaMethod notify = rsmo->property(propIndex).notifySignal();
+    Q_ASSERT(notify.isValid());
+#if QT_VERSION < QT_VERSION_CHECK(6, 10, 0)
+    static const QMetaMethod dispatch = staticMetaObject.method(
+        staticMetaObject.indexOfSlot("propertyChanged()"));
+    Q_ASSERT(dispatch.isValid());
+
+    connect(rs, notify, this, dispatch);
+    m_updateUi.insert(notify.methodIndex(), updateUi);
+#else
+    QMetaObject::connect(rs, notify, this, [updateUi]() { updateUi(); });
+#endif
+    updateUi();
+}
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 10, 0)
+void RenderSettingsDialog::propertyChanged()
+{
+    if (const auto &updateUi = m_updateUi.value(senderSignalIndex()))
+        updateUi();
+}
+#endif

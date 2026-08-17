@@ -38,17 +38,12 @@ Item {
 
         let r = root.renderController.radius
         let z = 1
-        if (view.camera == pcamera) {
-            let r_max = pcamera.z * Math.sin(pcamera.fieldOfView * Math.PI / 180 / 2)
-            z = r_max / r
-            if (pcamera.fieldOfViewOrientation == PerspectiveCamera.Vertical && (width < height))
-                z = z * width / height
-            else if (pcamera.fieldOfViewOrientation == PerspectiveCamera.Horizontal && (height < width))
-                z = z * height / width
-        } else {
-            let size = (width < height) ? width : height
-            z = (r > 0) ? (size / r) : 1
-        }
+        let r_max = pcamera.z * Math.sin(pcamera.fieldOfView * Math.PI / 180 / 2)
+        z = (r > 0) ? (r_max / r) : 1
+        if (pcamera.fieldOfViewOrientation == PerspectiveCamera.Vertical && (width < height))
+            z = z * width / height
+        else if (pcamera.fieldOfViewOrientation == PerspectiveCamera.Horizontal && (height < width))
+            z = z * height / width
 
         rootNode.scale = Qt.vector3d(z, z, z)
         rootNode.position = Qt.vector3d(0, 0, 0)
@@ -87,18 +82,12 @@ Item {
            brightness: RenderSettings.additionalLight
         }
 
-        camera: RenderSettings.orthographicCamera ? ocamera : pcamera
-
-        OrthographicCamera {
-            id: ocamera
-            z: 3000
-        }
-
-        PerspectiveCamera {
+        camera: PerspectiveCamera {
             id: pcamera
             z: 3000
             fieldOfView: RenderSettings.fieldOfView
         }
+
 
         Node {
             id: rootNode

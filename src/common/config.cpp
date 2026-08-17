@@ -179,6 +179,10 @@ void Config::upgrade(int vmajor, int vminor, int vpatch)
     if (cfgver < mkver(2024, 1, 1)) {
         setValue(u"Interface/ToolBarSizeEnum"_qs, value(u"Interface/IconSizeEnum"_qs, 0).toInt());
     }
+    if (cfgver < mkver(2026, 9, 1)) { //TODO: adjust for next release
+        // reset the 3D render settings to defaults
+        remove(u"LDraw/RenderSettings"_qs);
+    }
 }
 
 QVariantList Config::availableLanguages() const

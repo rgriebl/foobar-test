@@ -1195,7 +1195,7 @@
         <translation>Votre jeton a probablement expiré&#x202f;: vous pouvez cliquer sur &lt;i&gt;Réessayer&lt;/i&gt; pour ouvrir les paramètres et le renouveler.</translation>
     </message>
     <message>
-        <location line="+409"/>
+        <location line="+411"/>
         <source>No valid BrickLink access token found.&lt;br /&gt;&lt;br /&gt;Do you want to change the settings now?</source>
         <translation>Aucun jeton d&apos;accès BrickLink valide n&apos;a été trouvé.&lt;br /&gt;&lt;br /&gt;Voulez-vous changer ces paramètres maintenant&#x202f;?</translation>
     </message>
@@ -5027,32 +5027,27 @@ Clic droit&#x202f;: Menu</translation>
         <translation>Généralités</translation>
     </message>
     <message>
-        <location line="+9"/>
         <source>Camera</source>
-        <translation>Appareil photo</translation>
+        <translation type="vanished">Appareil photo</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Orthographic</source>
-        <translation>Orthographique</translation>
+        <translation type="vanished">Orthographique</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Perspective</source>
-        <translation>Perspective</translation>
+        <translation type="vanished">Perspective</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source>Field of view</source>
-        <translation>Champ de vision</translation>
+        <translation type="vanished">Champ de vision</translation>
     </message>
     <message>
-        <location line="+23"/>
         <source> °</source>
-        <translation> °</translation>
+        <translation type="vanished"> °</translation>
     </message>
     <message>
-        <location line="+21"/>
+        <location line="+54"/>
         <source>Lines</source>
         <translation>Lignes</translation>
     </message>
@@ -5072,27 +5067,23 @@ Clic droit&#x202f;: Menu</translation>
         <translation> px</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Animation</source>
-        <translation>Animation</translation>
+        <translation type="vanished">Animation</translation>
     </message>
     <message>
-        <location line="+28"/>
         <source> ° / tick</source>
-        <translation> ° / tique</translation>
+        <translation type="vanished"> ° / tique</translation>
     </message>
     <message>
-        <location line="+15"/>
         <source>Debug</source>
-        <translation>Débogage</translation>
+        <translation type="vanished">Débogage</translation>
     </message>
     <message>
-        <location line="+7"/>
         <source>Show bounding spheres</source>
-        <translation>Montre les sphères de délimitation</translation>
+        <translation type="vanished">Montre les sphères de délimitation</translation>
     </message>
     <message>
-        <location line="+23"/>
+        <location line="-87"/>
         <source>Anti-Aliasing</source>
         <translation>Anti-crénelage</translation>
     </message>
@@ -5117,7 +5108,17 @@ Clic droit&#x202f;: Menu</translation>
         <translation>Très élevé</translation>
     </message>
     <message>
-        <location line="+9"/>
+        <location line="+8"/>
+        <source>Surfaces</source>
+        <translation>Surfaces</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>Smoothly curved</source>
+        <translation>Courbes lissées</translation>
+    </message>
+    <message>
+        <location line="+81"/>
         <source>Lighting</source>
         <translation>Éclairage</translation>
     </message>
