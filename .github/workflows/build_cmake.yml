@@ -31,6 +31,15 @@ defaults:
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_docs:
+        description: "Publish the extensions documentation to GitHub Pages"
+        type: boolean
+        default: false
+      publish_docker:
+        description: "Publish the backend Docker image to Docker Hub"
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -479,6 +488,7 @@ jobs:
           build/libBrickStore_*.so build/BrickStore.debug
           build/android_abi_builds/*/libBrickStore_*.so
           build/android_abi_builds/*/BrickStore.debug
+
   # BUILD for iOS
   #################################################
 
@@ -537,12 +547,12 @@ jobs:
         path: "build/*.ipa"
         archive: false
 
-  # BUILD for Linux (Debian packages)
+  # BUILD for Linux (distro packages)
   #################################################
 
-  # Runs directly in the distro container, so the deb is linked against that
-  # distro's Qt. Steps that need the docker CLI cannot live here - buildpack-deps
-  # does not ship it - hence the separate publish-backend-docker job.
+  # User facing packages only. Each one builds in its own distro's container, so it
+  # links against that distro's Qt and CPack resolves the dependencies against a
+  # clean environment instead of the runner's.
 
   build-debian:
     name: ${{ matrix.config.name }}
@@ -557,11 +567,43 @@ jobs:
           artifact: "Ubuntu-24.04"
           debian_container: "buildpack-deps:24.04"
 
-        - name: "Debian 13 Backend"
-          artifact: "Debian-13-Backend"
-          debian_container: "buildpack-deps:trixie"
-          backend_only: true
-          generate_docs: true
+    steps:
+
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Install Qt from Linux Distro
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        apt -y update
+        apt -y install debhelper lsb-release fakeroot build-essential \
+            $BRICKSTORE_QT6_DEB_PACKAGES $BRICKSTORE_GUI_QT6_DEB_PACKAGES \
+
+    - name: Build for Linux (Debian package)
+      run: |
+        /usr/lib/qt6/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -B build -S .
+        cmake --build build --config RelWithDebInfo --parallel --target deb-package --verbose
+
+    - name: Upload Linux DEB
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ matrix.config.artifact }}
+        path: "build/*.deb"
+        archive: false
+
+  # BUILD the backend
+  #################################################
+
+  # Kept apart from the user facing packages: this deb exists mainly to feed the
+  # Docker image and has to match its debian:trixie-slim base. It is also where the
+  # extensions documentation is generated from.
+
+  build-backend:
+    name: "Debian 13 Backend"
+    runs-on: ubuntu-24.04
+    container: "buildpack-deps:trixie"
 
     steps:
 
@@ -574,45 +616,40 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         apt -y update
-        apt -y install \
-            $BRICKSTORE_QT6_DEB_PACKAGES \
-            ${{ !matrix.config.backend_only && '$BRICKSTORE_GUI_QT6_DEB_PACKAGES' || '' }} \
-            debhelper lsb-release fakeroot build-essential
+        apt -y install debhelper lsb-release fakeroot build-essential \
+            $BRICKSTORE_QT6_DEB_PACKAGES
 
-    - name: Build for Linux (Debian package)
+    - name: Build the backend (Debian package)
       run: |
-        /usr/lib/qt6/bin/qt-cmake -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            ${{ matrix.config.backend_only && '-DBACKEND_ONLY=ON' || '' }} \
+        /usr/lib/qt6/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBACKEND_ONLY=ON \
             -B build -S .
         cmake --build build --config RelWithDebInfo --parallel --target deb-package --verbose
 
-    - name: Upload Linux DEB
+    - name: Upload the backend DEB
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ matrix.config.artifact }}
+        name: Debian-13-Backend
         path: "build/*.deb"
         archive: false
 
-    # Generate documentation
-    #################################################
-
     - name: Generate Documentation
-      if: matrix.config.generate_docs && (github.ref == 'refs/heads/main')
       run: cmake --build build --target extensions-doc --verbose
 
     - name: Upload Documentation
-      if: matrix.config.generate_docs && (github.ref == 'refs/heads/main')
       uses: actions/upload-artifact@v7
       with:
         name: Documentation
         path: "build/doc/html/extensions"
 
-  # Generate the Backend Docker image
+  # BUILD the Backend Docker image
   #################################################
 
-  publish-backend-docker:
-    needs: [ build-debian ]
+  # Cannot live in build-backend: that job runs inside buildpack-deps, which has no
+  # docker CLI. The image tag is derived from BUILD_NUMBER, which is identical in
+  # every job of a run, so it survives the save/load handover unchanged.
+
+  build-backend-docker:
+    needs: [ build-backend ]
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v6
@@ -623,16 +660,20 @@ jobs:
         name: Debian-13-Backend
         path: docker
 
-    - name: Create and push Docker image
-      env:
-        DOCKER_USER: ${{ secrets.DOCKER_USER }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+    - name: Build the Docker image
       run: |
         mv docker/*.deb docker/brickstore-backend.deb
-        cd docker
-        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
-        docker build . --tag "rgriebl/brickstore-backend:$BUILD_NUMBER"
-        docker push "rgriebl/brickstore-backend:$BUILD_NUMBER"
+        # a namespace-less local tag: the registry namespace is added by the publish
+        # job, which is the only one that knows DOCKER_USER
+        docker build docker --tag "brickstore-backend:$BUILD_NUMBER"
+        docker save "brickstore-backend:$BUILD_NUMBER" | gzip >backend-docker-image.tar.gz
+
+    - name: Upload the Docker image
+      uses: actions/upload-artifact@v7
+      with:
+        name: Backend-Docker-Image
+        path: backend-docker-image.tar.gz
+        archive: false
 
   # PUBLISH
   #################################################
@@ -642,6 +683,7 @@ jobs:
   # Qt's installed libraries, which only exist on the build runner.
 
   publish-snap:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [ build-snap-flatpak ]
     runs-on: ubuntu-24.04
     steps:
@@ -664,6 +706,7 @@ jobs:
         release: edge
 
   publish-playstore:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [ build-android ]
     runs-on: ubuntu-24.04
     steps:
@@ -691,6 +734,7 @@ jobs:
 
   # altool is macOS only, so this needs a macOS runner even though it only uploads
   publish-appstore:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [ build-ios ]
     runs-on: macos-26
     steps:
@@ -712,9 +756,29 @@ jobs:
             --apiIssuer "${{ secrets.APPSTORE_API_KEY_ISSUER }}" \
             --apiKey "${{ secrets.APPSTORE_API_KEY_ID }}"
 
+  publish-backend-docker:
+    if: inputs.publish_docker
+    needs: [ build-backend-docker ]
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Download the Docker image
+      uses: actions/download-artifact@v7
+      with:
+        name: Backend-Docker-Image
+
+    - name: Push the Docker image
+      env:
+        DOCKER_USER: ${{ secrets.DOCKER_USER }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        docker load -i backend-docker-image.tar.gz
+        docker tag "brickstore-backend:$BUILD_NUMBER" "$DOCKER_USER/brickstore-backend:$BUILD_NUMBER"
+        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+        docker push "$DOCKER_USER/brickstore-backend:$BUILD_NUMBER"
+
   publish-docs:
-    if: github.ref == 'refs/heads/main'
-    needs: [ build-debian ]
+    if: inputs.publish_docs || (startsWith(github.ref, 'refs/tags/v'))
+    needs: [ build-backend ]
     runs-on: ubuntu-24.04
     permissions:
       contents: write   # pushes to the gh-pages branch
@@ -722,7 +786,7 @@ jobs:
     - uses: actions/checkout@v6
 
     - name: Download the documentation
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: Documentation
         path: extensions-doc
@@ -740,7 +804,7 @@ jobs:
 
   release:
     needs: [ build-windows, build-appimage, build-snap-flatpak, build-macos,
-             build-android, build-ios, build-debian ]
+             build-android, build-ios, build-debian, build-backend ]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
@@ -749,7 +813,7 @@ jobs:
     - uses: actions/checkout@v6
 
     - name: Download Artifacts to Release
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         path: 'artifacts'
 
@@ -757,7 +821,7 @@ jobs:
       run: |
         # everything left in artifacts/ becomes a release asset, so drop the ones
         # that are only a handover between jobs
-        rm -rf artifacts/Documentation
+        rm -rf artifacts/Documentation artifacts/Backend-Docker-Image
         find artifacts -mindepth 2 -type f -print0 | while read -d $'\0' a; do
           d="$(dirname $a)"
           mv "$a" "${d}-$(basename $a)"
