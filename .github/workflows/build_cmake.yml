@@ -5,6 +5,8 @@ name: CMake Build Matrix
 
 env:
   BUILD_NUMBER: ${{ github.run_number }}
+  BRICKSTORE_QT_DESKTOP_VERSION: '6.10.3'
+  BRICKSTORE_QT_MOBILE_VERSION: '6.11.1'
   BRICKSTORE_QT6_DEB_PACKAGES: >-
       build-essential cmake ninja-build
       libglvnd-dev libtbb-dev
@@ -23,6 +25,10 @@ env:
   BRICKSTORE_GUI_QT6_INSTALLER_MODULES: >-
       qtquick3d qtshadertools qtquicktimeline qt5compat qtimageformats qtmultimedia qthttpserver qtwebsockets
 
+defaults:
+  run:
+    shell: bash
+
 on:
   workflow_dispatch:
   push:
@@ -32,8 +38,23 @@ on:
     tags:
       - v*
 
+# Superseded branch builds are pointless, but a half-finished release is worse
+# than a slow one - never cancel a tag build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+# Least privilege for the automatic GITHUB_TOKEN; the jobs that need to write to
+# the repository opt back in individually.
+permissions:
+  contents: read
+
 jobs:
-  build:
+
+  # BUILD for Windows
+  #################################################
+
+  build-windows:
     name: ${{ matrix.config.name }}
     runs-on: ${{ matrix.config.runs-on }}
 
@@ -44,322 +65,93 @@ jobs:
         - name: "Windows Intel 64bit"
           artifact: "Windows-x64"
           runs-on: windows-2022
-          os: windows
           qt_host: 'windows'
-          qt_version: '6.10.3'
           qt_arch: 'win64_msvc2022_64'
           qt_dir: "msvc2022_64"
           environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
-          cmake_extra_config: '-DSENTRY=ON'
 
         - name: "Windows ARM 64bit"
           artifact: "Windows-ARM64"
           runs-on: windows-11-arm
-          os: windows
           qt_host: 'windows_arm64'
-          qt_version: '6.10.3'
           qt_arch: 'win64_msvc2022_arm64'
           qt_dir: "msvc2022_arm64"
           environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvarsamd64_arm64.bat"
-          cmake_extra_config: '-DSENTRY=ON'
-
-        - name: "Ubuntu 24.04"
-          artifact: "Ubuntu-24.04"
-          runs-on: ubuntu-24.04
-          os: linux
-          debian_container: "buildpack-deps:24.04"
-
-        - name: "Debian 13 Backend"
-          artifact: "Debian-13-Backend"
-          runs-on: ubuntu-24.04
-          os: linux
-          debian_container: "buildpack-deps:trixie"
-          backend_only: true
-          generate_docs: true
-          generate_docker: true
-
-        - name: "Linux AppImage"
-          artifact: "Linux-AppImage"
-          runs-on: ubuntu-22.04
-          os: linux
-          appimage: true
-          qt_tools: tools_opensslv3_src
-          qt_host: 'linux'
-          qt_version: '6.10.3'
-          qt_arch: 'linux_gcc_64'
-          qt_dir: 'gcc_64'
-
-        - name: "Ubuntu Snap"
-          artifact: "Linux-Snap"
-          runs-on: ubuntu-24.04
-          os: linux
-          snap: true
-          qt_tools: tools_opensslv3_src
-          qt_host: 'linux'
-          qt_version: '6.10.3'
-          qt_arch: 'linux_gcc_64'
-          qt_dir: 'gcc_64'
-
-        - name: "Linux Flatpak"
-          artifact: "Linux-Flatpak"
-          runs-on: ubuntu-24.04
-          os: linux
-          flatpak: true
-          qt_tools: tools_opensslv3_src # not needed, but the cache for this build is shared
-          qt_host: 'linux'
-          qt_version: '6.10.3'
-          qt_arch: 'linux_gcc_64'
-          qt_dir: 'gcc_64'
-
-        # not possible ATM, because the QCQtDeployer project does not distribute native ARM64 builds
-        # - name: "Linux Flatpak ARM"
-        #   artifact: "Linux-Flatpak-ARM64"
-        #   runs-on: ubuntu-24.04-arm
-        #   os: linux
-        #   flatpak: true
-        #   qt_host: 'linux_arm64'
-        #   qt_version: '6.10.3'
-        #   qt_arch: 'linux_gcc_arm64'
-        #   qt_dir: 'gcc_arm64'
-
-        - name: "macOS Universal"
-          artifact: "macOS"
-          runs-on: macos-15
-          os: macos
-          qt_host: 'mac'
-          qt_version: '6.10.3'
-          qt_arch: 'clang_64'
-          qt_dir: 'macos'
-          cmake_extra_config: '-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DSENTRY=ON'
-
-        # Intel only, 10.14, 10.15, 11 and 12
-        - name: "macOS 10 Legacy"
-          artifact: "macOS-10-Legacy"
-          runs-on: macos-15-intel
-          os: macos
-          qt_host: 'mac'
-          qt_version: '6.4.3'
-          qt_arch: 'clang_64'
-          qt_dir: 'macos'
-          cmake_extra_config: '-DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.14'
-          xcode: '16.2'
-
-        - name: "Android"
-          artifact: "Android"
-          runs-on: ubuntu-24.04
-          os: android
-          android_abi: 'arm64-v8a'
-          android_ndk: '27.3.13750724'
-          qt_host: 'linux'
-          qt_host_arch: 'linux_gcc_64'
-          qt_target: 'android'
-          qt_version: '6.11.1'
-          qt_arch: 'android_x86_64'
-          qt_extra_archs: 'android_arm64_v8a android_armv7'
-          cmake_extra_config: '-DSENTRY=ON'
-
-        - name: "iOS"
-          artifact: "iOS"
-          runs-on: macos-26
-          os: ios
-          qt_host: 'mac'
-          qt_host_arch: 'clang_64'
-          qt_target: 'ios'
-          qt_version: '6.11.1'
-          qt_arch: 'ios'
-          cmake_extra_config: ''
-
-  # BUILD
-  #################################################
 
     steps:
-
-    # Checkout
-    #################################################
-
     - uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
-    # Get Qt
-    #################################################
-
-    - name: Restore cached Qt from aqtinstall
-      id: restore-cache-qt
-      if: (matrix.config.os != 'linux') || matrix.config.appimage || matrix.config.snap || matrix.config.flatpak
-      uses: actions/cache/restore@v6
+    - uses: $/.github/actions/install-qt
       with:
-        path: "${{ runner.workspace }}/Qt/"
-        key: "Qt-${{ matrix.config.qt_version }}-${{ matrix.config.qt_host }}-${{ matrix.config.qt_arch }}-1"
-
-    - name: "Fix Python version"
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.13'
-
-    - name: Install Qt via aqtinstall
-      if: |
-        ((matrix.config.os != 'linux') || matrix.config.appimage || matrix.config.snap || matrix.config.flatpak)
-        && (steps.restore-cache-qt.outputs.cache-hit != 'true')
-      shell: sh
-      run: |
-        # pipx install aqtinstall
-        pipx install git+https://github.com/miurahr/aqtinstall@c84e1470349e5bedbeee977bd62ec495d50d65b6
-        if [ "${{ matrix.config.qt_host_arch }}" != "" ]; then
-          aqt -c .github/aqt-settings.ini install-qt -O "${{ runner.workspace }}/Qt/" \
-              ${{ matrix.config.qt_host }} desktop \
-              ${{ matrix.config.qt_version }} ${{ matrix.config.qt_host_arch }} \
-              -m $BRICKSTORE_GUI_QT6_INSTALLER_MODULES
-        fi
-        for arch in ${{ matrix.config.qt_arch }} ${{ matrix.config.qt_extra_archs }}; do
-          aqt -c .github/aqt-settings.ini install-qt -O "${{ runner.workspace }}/Qt/" \
-              ${{ matrix.config.qt_host }} ${{ matrix.config.qt_target || 'desktop' }} \
-              ${{ matrix.config.qt_version }} $arch \
-              -m $BRICKSTORE_GUI_QT6_INSTALLER_MODULES
-          if [ "${{ matrix.config.qt_tools }}" != "" ]; then
-            aqt -c .github/aqt-settings.ini install-tool -O "${{ runner.workspace }}/Qt/" \
-                ${{ matrix.config.qt_host }} ${{ matrix.config.qt_target || 'desktop' }} \
-                ${{ matrix.config.qt_tools }}
-          fi
-        done
-
-    - name: Install Qt via aqtinstall (finalize)
-      if: |
-        ((matrix.config.os != 'linux') || matrix.config.appimage || matrix.config.snap || matrix.config.flatpak)
-      shell: sh
-      run: |
-        # Set and export Qt6_DIR
-        if [ "${{ matrix.config.os }}" = "windows" ]; then
-          export Qt6_DIR="${{ runner.workspace }}\\Qt\\${{ matrix.config.qt_version }}\\${{ matrix.config.qt_dir || matrix.config.qt_arch }}"
-        else
-          export Qt6_DIR="${{ runner.workspace }}/Qt/${{ matrix.config.qt_version }}/${{ matrix.config.qt_dir || matrix.config.qt_arch }}"
-        fi
-        echo "Qt6_DIR=$Qt6_DIR" >> $GITHUB_ENV
-
-        # Fix broken Windows / ARM64 setup
-        if [ "${{ matrix.config.qt_arch }}" = "win64_msvc2022_arm64_cross_compiled" ]; then
-          # Qt < 6.5.0
-          sed -i "s,/Users/qt/work/install/,`echo -E ${Qt6_DIR} | tr '\\' '/'`/../msvc2022_64/," "${Qt6_DIR}/bin/qtpaths.bat"
-          sed -i "s,/Users/qt/work/install/,`echo -E ${Qt6_DIR} | tr '\\' '/'`/../msvc2022_64/," "${Qt6_DIR}/bin/qmake.bat"
-          # Qt >= 6.5.0
-          sed -i "s,\\\Users\\\qt\\\work\\\install\\\,`echo -E ${Qt6_DIR} | sed -e 's,\\\,\\\\\\\,g'`\\\..\\\msvc2022_64\\\," "${Qt6_DIR}/bin/qtpaths.bat"
-          sed -i "s,\\\Users\\\qt\\\work\\\install\\\,`echo -E ${Qt6_DIR} | sed -e 's,\\\,\\\\\\\,g'`\\\..\\\msvc2022_64\\\," "${Qt6_DIR}/bin/qmake.bat"
-          ${Qt6_DIR}/bin/qmake.bat -query
-        fi
-
-        # remove all sqldrivers, except sqlite to avoid missing dependencies when packaging
-        find "$Qt6_DIR/plugins/sqldrivers" -type f -not -ipath "*qsqlite*" -delete
-        find "$Qt6_DIR/lib/cmake/Qt6Sql" -name "*DriverPlugin*" -not -name "*QSQLite*" -delete
-
-        # macOS/Windows: remove the openssl TLS plugin, as this can cause problems
-        case "${{ matrix.config.os }}" in
-          macos|windows)
-            find "$Qt6_DIR/plugins/tls" -type f -ipath "*qopensslbackend*" -delete
-            find "$Qt6_DIR/lib/cmake/Qt6Network" -name "*QTlsBackendOpenSSL*" -delete
-            ;;
-        esac
-
-    - name: Install Qt from Linux Distro (container)
-      if: (matrix.config.os == 'linux') && matrix.config.debian_container
-      run: |
-        sudo -E docker run -v `pwd`:/brickstore -e BUILD_NUMBER --rm --name "debian-build" -d "${{ matrix.config.debian_container }}" sleep 1d
-        sudo docker exec -e DEBIAN_FRONTEND=noninteractive "debian-build" apt -y update
-        sudo docker exec -e DEBIAN_FRONTEND=noninteractive "debian-build" apt -y install \
-            $BRICKSTORE_QT6_DEB_PACKAGES \
-            ${{ !matrix.config.backend_only && '$BRICKSTORE_GUI_QT6_DEB_PACKAGES' || '' }} \
-            debhelper lsb-release fakeroot build-essential
-      shell: bash
-
-    - name: Save cached Qt from aqtinstall
-      id: save-cache-qt
-      if: |
-        ((matrix.config.os != 'linux') || matrix.config.appimage || matrix.config.snap || matrix.config.flatpak)
-        && (steps.restore-cache-qt.outputs.cache-hit != 'true')
-      uses: actions/cache/save@v6
-      with:
-        key: ${{ steps.restore-cache-qt.outputs.cache-primary-key }}
-        path: "${{ runner.workspace }}/Qt/"
-
-    # Build for Windows
-    #################################################
-
+        os: windows
+        version: ${{ env.BRICKSTORE_QT_DESKTOP_VERSION }}
+        host: ${{ matrix.config.qt_host }}
+        arch: ${{ matrix.config.qt_arch }}
+        dir: ${{ matrix.config.qt_dir }}
+        modules: ${{ env.BRICKSTORE_GUI_QT6_INSTALLER_MODULES }}
 
     - name: Build for Windows
-      if: (matrix.config.os == 'windows')
       run: |
         choco install ninja
         call "${{ matrix.config.environment_script }}"
-        call %Qt6_DIR%\bin\qt-cmake.bat -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo ${{ matrix.config.cmake_extra_config }} -B build -S .
+        call %Qt6_DIR%\bin\qt-cmake.bat -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSENTRY=ON -B build -S .
         cmake --build build --config RelWithDebInfo --parallel --target installer --verbose
       shell: cmd
 
     - name: Upload Windows Installer
-      if: (matrix.config.os == 'windows')
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.config.artifact }}
         path: "build/*.exe"
+        archive: false
 
     - name: Upload Windows debug info to sentry.io
-      if: (matrix.config.os == 'windows')
-      run: |
-        curl.exe -L --output ..\\sentry-cli.exe "https://github.com/getsentry/sentry-cli/releases/latest/download/sentry-cli-Windows-i686.exe"
-        ..\\sentry-cli.exe --auth-token ${{ secrets.SENTRY_AUTH_TOKEN }} upload-dif --org brickstore --project brickstore build/bin %Qt6_DIR%\bin
-      shell: cmd
-
-    # Build for Linux
-    #################################################
-
-    - name: Build for Linux (Debian package)
-      if: (matrix.config.os == 'linux') && matrix.config.debian_container
-      run: |
-        sudo docker exec -w /brickstore "debian-build" /usr/lib/qt6/bin/qt-cmake -G Ninja \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            ${{ matrix.config.backend_only && '-DBACKEND_ONLY=ON' || '' }} \
-            ${{ matrix.config.cmake_extra_config }} -B build -S .
-        sudo docker exec -w /brickstore "debian-build" cmake --build build --config RelWithDebInfo \
-            --parallel --target deb-package --verbose
-      shell: bash
-
-    - name: Upload Linux DEB
-      if: (matrix.config.os == 'linux') && matrix.config.debian_container
-      uses: actions/upload-artifact@v6
+      uses: $/.github/actions/sentry-upload-dif
       with:
-        name: ${{ matrix.config.artifact }}
-        path: "build/*.deb"
+        os: windows
+        auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        paths: build/bin %Qt6_DIR%\bin
 
-    # Build for Linux (AppImage / Snap / Flatpak)
-    #################################################
+  # BUILD for Linux (AppImage)
+  #################################################
+
+  # Built on the oldest supported runner on purpose: the AppImage has to run on
+  # distros with an older glibc than the Snap and Flatpak builds need to.
+
+  build-appimage:
+    name: "Linux AppImage"
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - uses: $/.github/actions/install-qt
+      with:
+        os: linux
+        version: ${{ env.BRICKSTORE_QT_DESKTOP_VERSION }}
+        host: 'linux'
+        arch: 'linux_gcc_64'
+        dir: 'gcc_64'
+        tools: tools_opensslv3_src
+        modules: ${{ env.BRICKSTORE_GUI_QT6_INSTALLER_MODULES }}
 
     - name: Build for Linux (AppImage)
-      if: matrix.config.appimage
       run: |
         sudo DEBIAN_FRONTEND=noninteractive apt -y update
         sudo DEBIAN_FRONTEND=noninteractive apt -y install \
-            g++-10 ninja-build libglvnd-dev libtbb-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            g++-10 cmake ninja-build libglvnd-dev libtbb-dev libxkbcommon-dev libxkbcommon-x11-0 \
             libxcb-\* libpulse-dev libgstreamer\*1.0-dev libsecret-1-dev libva-dev libcups2-dev libfuse2
         ${Qt6_DIR}/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER=/usr/bin/gcc-10 -DCMAKE_CXX_COMPILER=/usr/bin/g++-10 \
-            ${{ matrix.config.cmake_extra_config }} -B build -S .
+            -B build -S .
         cmake --build build --config RelWithDebInfo --parallel --verbose
         env DESTDIR=build/BrickStore-Install cmake --install build --config RelWithDebInfo --prefix /usr
-      shell: bash
 
-    - name: Build for Linux (Snap / Flatpak)
-      if: matrix.config.snap || matrix.config.flatpak
-      run: |
-        sudo DEBIAN_FRONTEND=noninteractive apt -y update
-        sudo DEBIAN_FRONTEND=noninteractive apt -y install \
-            g++ cmake ninja-build libglvnd-dev libtbb-dev libxkbcommon-dev libxkbcommon-x11-0 \
-            libxcb-\* libpulse-dev libgstreamer\*1.0-dev libsecret-1-dev libva-dev libcups2-dev
-        ${Qt6_DIR}/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            ${{ matrix.config.cmake_extra_config }} -B build -S .
-        cmake --build build --config RelWithDebInfo --parallel --verbose
-        env DESTDIR=build/BrickStore-Install cmake --install build --config RelWithDebInfo --prefix /usr
-      shell: bash
-
-    - name: OpenSSLv3 for Linux (AppImage / Snap)
-      if: matrix.config.appimage || matrix.config.snap
+    - name: OpenSSLv3 for Linux (AppImage)
       run: |
         cd ${Qt6_DIR}/../../Tools/OpenSSLv3/src
         ./Configure --prefix=/usr --libdir=lib --openssldir=/etc/ssl '-Wl,-rpath,\$$ORIGIN,--enable-new-dtags'
@@ -373,10 +165,8 @@ jobs:
             rm -f lib${i}.so.1*
             ln -sr lib${i}.so.3 lib${i}.so
         done
-      shell: bash
 
     - name: Create Linux AppImage
-      if: matrix.config.appimage
       run: |
         mkdir -p .linuxdeploy
         wget  -P .linuxdeploy -N "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
@@ -393,17 +183,83 @@ jobs:
                 -l /usr/lib/$(dpkg-architecture -qDEB_BUILD_MULTIARCH)/libva-x11.so.2 \
                 --plugin qt \
                 --output appimage
-      shell: bash
 
     - name: Upload Linux AppImage
-      if: matrix.config.appimage
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
-        name: ${{ matrix.config.artifact }}
+        name: "Linux-AppImage"
         path: "*.AppImage"
+        archive: false
+
+  # BUILD for Linux (Snap / Flatpak)
+  #################################################
+
+  build-snap-flatpak:
+    name: ${{ matrix.config.name }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - name: "Ubuntu Snap"
+          artifact: "Linux-Snap"
+          snap: true
+
+        - name: "Linux Flatpak"
+          artifact: "Linux-Flatpak"
+          flatpak: true
+
+        # An ARM Flatpak is not possible ATM, because the QCQtDeployer project does not
+        # distribute native ARM64 builds. It would need a separate job anyway: runs-on
+        # and the Qt architecture are fixed per job now, not per matrix entry.
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    # the OpenSSL sources are only needed by the Snap, but installing the tool for
+    # both keeps the aqtinstall cache shared between the two legs
+
+    - uses: $/.github/actions/install-qt
+      with:
+        os: linux
+        version: ${{ env.BRICKSTORE_QT_DESKTOP_VERSION }}
+        host: 'linux'
+        arch: 'linux_gcc_64'
+        dir: 'gcc_64'
+        tools: tools_opensslv3_src
+        modules: ${{ env.BRICKSTORE_GUI_QT6_INSTALLER_MODULES }}
+
+    - name: Build for Linux (Snap / Flatpak)
+      run: |
+        sudo DEBIAN_FRONTEND=noninteractive apt -y update
+        sudo DEBIAN_FRONTEND=noninteractive apt -y install \
+            g++ cmake ninja-build libglvnd-dev libtbb-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-\* libpulse-dev libgstreamer\*1.0-dev libsecret-1-dev libva-dev libcups2-dev
+        ${Qt6_DIR}/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -B build -S .
+        cmake --build build --config RelWithDebInfo --parallel --verbose
+        env DESTDIR=build/BrickStore-Install cmake --install build --config RelWithDebInfo --prefix /usr
+
+    - name: OpenSSLv3 for Linux (Snap)
+      if: matrix.config.snap
+      run: |
+        cd ${Qt6_DIR}/../../Tools/OpenSSLv3/src
+        ./Configure --prefix=/usr --libdir=lib --openssldir=/etc/ssl '-Wl,-rpath,\$$ORIGIN,--enable-new-dtags'
+        make -j4 build_libs
+        make DESTDIR=${GITHUB_WORKSPACE}/build/BrickStore-Install install_runtime_libs
+
+        # Qt opens the unversioned libs first, so we need to prevent those from being
+        # loaded from the host system.
+        cd ${GITHUB_WORKSPACE}/build/BrickStore-Install/usr/lib/
+        for i in crypto ssl; do
+            rm -f lib${i}.so.1*
+            ln -sr lib${i}.so.3 lib${i}.so
+        done
 
     - name: Create Linux Snap / Flatpak 1
-      if: matrix.config.snap || matrix.config.flatpak
       run: |
         sudo DEBIAN_FRONTEND=noninteractive apt -y install libfuse2
         wget  -P .cqtdeployer -N "https://github.com/QuasarApp/CQtDeployer/releases/download/v1.6.2441.67ee1ef/CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.zip"
@@ -433,10 +289,11 @@ jobs:
 
     - name: Upload Linux Flatpak
       if: matrix.config.flatpak
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.config.artifact }}
         path: "build/*.flatpak"
+        archive: false
 
     - name: Create Linux Snap 2
       if: matrix.config.snap
@@ -447,27 +304,114 @@ jobs:
 
     - name: Upload Linux Snap
       if: matrix.config.snap
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.config.artifact }}
         path: ${{ steps.create-snap.outputs.snap }}
+        archive: false
 
-    - name: Publish to Snapcraft (edge channel)
-      if: matrix.config.snap
-      uses: snapcore/action-publish@v1
-      env:
-        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.UBUNTU_SNAP_LOGIN }}
+  # BUILD for macOS
+  #################################################
+
+  build-macos:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.runs-on }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - name: "macOS Universal"
+          artifact: "macOS"
+          runs-on: macos-15
+          cmake_extra_config: '-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DSENTRY=ON'
+
+        # Intel only, 10.14, 10.15, 11 and 12
+        - name: "macOS 10 Legacy"
+          artifact: "macOS-10-Legacy"
+          runs-on: macos-15-intel
+          qt_version: '6.4.3'
+          cmake_extra_config: '-DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.14'
+          xcode: '16.2'
+
+    steps:
+    - uses: actions/checkout@v6
       with:
-        snap: ${{ steps.create-snap.outputs.snap }}
-        release: edge
+        fetch-depth: 0
 
-    # Build for Android
-    #################################################
+    - uses: $/.github/actions/install-qt
+      with:
+        os: macos
+        version: ${{ matrix.config.qt_version || env.BRICKSTORE_QT_DESKTOP_VERSION }}
+        host: 'mac'
+        arch: 'clang_64'
+        dir: 'macos'
+        modules: ${{ env.BRICKSTORE_GUI_QT6_INSTALLER_MODULES }}
+
+    - name: Set up Apple signing
+      uses: $/.github/actions/apple-signing
+      with:
+        certificate-p12-data: ${{ secrets.MACOS_SIGNING_CERTIFICATE_P12_DATA }}
+        certificate-password: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+        api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+        api-key-p8-data: ${{ secrets.APPSTORE_API_KEY_P8_DATA }}
+        xcode-version: ${{ matrix.config.xcode }}
+
+    - name: Build for macOS
+      run: |
+        ${Qt6_DIR}/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -D "MACOS_SIGNING_IDENTITY=${{ secrets.MACOS_SIGNING_IDENTITY }}" \
+            ${{ matrix.config.cmake_extra_config }} -B build -S .
+        cmake --build build --config RelWithDebInfo --parallel --target dmg --verbose
+
+    - name: Notarize and staple macOS DMG
+      run: |
+        xcrun notarytool submit --wait build/BrickStore-*.dmg \
+            --issuer "${{ secrets.APPSTORE_API_KEY_ISSUER }}" \
+            --key-id "${{ secrets.APPSTORE_API_KEY_ID }}" \
+            --key "~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APPSTORE_API_KEY_ID }}.p8"
+        xcrun stapler staple -v build/BrickStore-*.dmg
+
+    - name: Upload macOS DMG
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ matrix.config.artifact }}
+        path: "build/*.dmg"
+        archive: false
+
+    - name: Upload macOS debug info to sentry.io
+      uses: $/.github/actions/sentry-upload-dif
+      with:
+        os: macos
+        auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        paths: build/BrickStore.app.dSYM ${Qt6_DIR}/lib/
+
+  # BUILD for Android
+  #################################################
+
+  build-android:
+    name: "Android"
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - uses: $/.github/actions/install-qt
+      with:
+        os: android
+        version: ${{ env.BRICKSTORE_QT_MOBILE_VERSION }}
+        host: 'linux'
+        host-arch: 'linux_gcc_64'
+        target: 'android'
+        arch: 'android_x86_64'
+        extra-archs: 'android_arm64_v8a android_armv7'
+        modules: ${{ env.BRICKSTORE_GUI_QT6_INSTALLER_MODULES }}
 
     - name: Build for Android
-      if: (matrix.config.os == 'android')
       run: |
-        echo "Using NDK: $ANDROID_SDK_ROOT/ndk/${{ matrix.config.android_ndk }}"
+        echo "Using NDK: $ANDROID_SDK_ROOT/ndk/27.3.13750724"
         echo "QT_HOST_PATH: $(readlink -f $Qt6_DIR/../gcc_64)"
         # fix build-tools 33 (dx missing)
         for dir in `find $ANDROID_SDK_ROOT/build-tools/ -type d -mindepth 1`; do
@@ -490,11 +434,11 @@ jobs:
             -D "QT_HOST_PATH=$(readlink -f $Qt6_DIR/../gcc_64)" \
             -D "QT_ANDROID_TARGET_SDK_VERSION=36" \
             -D "QT_ANDROID_BUILD_ALL_ABIS=TRUE" \
-            -D "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${{ matrix.config.android_ndk }}" \
+            -D "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/27.3.13750724" \
             -D "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" \
             -D "QT_ANDROID_SIGN_AAB=TRUE" \
             -D "QT_ANDROID_MULTI_ABI_FORWARD_VARS=SENTRY" \
-            ${{ matrix.config.cmake_extra_config }} -B build -S .
+            -DSENTRY=ON -B build -S .
         echo "Creating AAB"
         cmake --build build --config RelWithDebInfo --parallel --target final-aab --verbose
         echo "Creating ARM64 APK"
@@ -502,32 +446,240 @@ jobs:
         echo "Creating ARM APK"
         cmake --build build/android_abi_builds/armeabi-v7a --config RelWithDebInfo --parallel --target final-apk --verbose
 
-        echo VERSION_NUMBER="`cat VERSION_NUMBER`" >> $GITHUB_ENV
-      shell: bash
-
     - name: Upload Android AAB
-      if: (matrix.config.os == 'android')
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
-        name: ${{ matrix.config.artifact }}-PlayStore
+        name: "Android-PlayStore"
         path: "build/*.aab"
+        archive: false
 
     - name: Upload Android ARM64 APK
-      if: (matrix.config.os == 'android')
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
-        name: ${{ matrix.config.artifact }}-ARM64
+        name: "Android-ARM64"
         path: "build/android_abi_builds/arm64-v8a/*.apk"
+        archive: false
 
     - name: Upload Android ARM APK
-      if: (matrix.config.os == 'android')
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
-        name: ${{ matrix.config.artifact }}-ARM
+        name: "Android-ARM"
         path: "build/android_abi_builds/armeabi-v7a/*.apk"
+        archive: false
+
+    # The .so only carries the symbol table: enable_separate_debug_info() moves the
+    # DWARF into the BrickStore.debug companion, so both are needed.
+    # Qt's own Android libraries are shipped stripped and without companion debug files.
+    - name: Upload Android debug info to sentry.io
+      uses: $/.github/actions/sentry-upload-dif
+      with:
+        os: linux
+        auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        paths: >-
+          build/libBrickStore_*.so build/BrickStore.debug
+          build/android_abi_builds/*/libBrickStore_*.so
+          build/android_abi_builds/*/BrickStore.debug
+  # BUILD for iOS
+  #################################################
+
+  # see here for a description of this setup
+  # https://betterprogramming.pub/deploy-an-ios-app-to-testflight-or-the-app-store-using-github-actions-c4d7082b1430
+
+  build-ios:
+    name: "iOS"
+    runs-on: macos-26
+    env:
+      # Pin the XCode version when a new one on the runner breaks the build, until a
+      # fixed one ships. Empty means whatever the runner defaults to.
+      XCODE_VERSION: ''
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - uses: $/.github/actions/install-qt
+      with:
+        os: ios
+        version: ${{ env.BRICKSTORE_QT_MOBILE_VERSION }}
+        host: 'mac'
+        host-arch: 'clang_64'
+        target: 'ios'
+        arch: 'ios'
+        modules: ${{ env.BRICKSTORE_GUI_QT6_INSTALLER_MODULES }}
+
+    - name: Set up Apple signing
+      uses: $/.github/actions/apple-signing
+      with:
+        certificate-p12-data: ${{ secrets.IOS_SIGNING_CERTIFICATE_P12_DATA }}
+        certificate-password: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}
+        api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+        api-key-p8-data: ${{ secrets.APPSTORE_API_KEY_P8_DATA }}
+        provisioning-profile-data: ${{ secrets.IOS_PROVISIONING_PROFILE_DATA }}
+        provisioning-profile-specifier: ${{ secrets.IOS_PROVISIONING_PROFILE_SPECIFIER }}
+        xcode-version: ${{ env.XCODE_VERSION }}
+
+    - name: Build for iOS
+      run: |
+        ${Qt6_DIR}/bin/qt-cmake -G Xcode -DCMAKE_BUILD_TYPE=Release \
+            -D "QT_HOST_PATH=$(readlink -f $Qt6_DIR/../macos)" \
+            -D "CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=${{ secrets.IOS_DEV_TEAM }}" \
+            -D "CMAKE_XCODE_ATTRIBUTE_PROVISIONING_PROFILE_SPECIFIER=${{ secrets.IOS_PROVISIONING_PROFILE_SPECIFIER }}" \
+            -D "CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=${{ secrets.IOS_CODE_SIGN_IDENTITY }}" \
+            -D "CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_STYLE=Manual" \
+            -B build -S .
+        cmake --build build --config Release --parallel --target ipa --verbose
+
+    - name: Upload iOS IPA
+      uses: actions/upload-artifact@v7
+      with:
+        name: "iOS-AppStore"
+        path: "build/*.ipa"
+        archive: false
+
+  # BUILD for Linux (Debian packages)
+  #################################################
+
+  # Runs directly in the distro container, so the deb is linked against that
+  # distro's Qt. Steps that need the docker CLI cannot live here - buildpack-deps
+  # does not ship it - hence the separate publish-backend-docker job.
+
+  build-debian:
+    name: ${{ matrix.config.name }}
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.config.debian_container }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - name: "Ubuntu 24.04"
+          artifact: "Ubuntu-24.04"
+          debian_container: "buildpack-deps:24.04"
+
+        - name: "Debian 13 Backend"
+          artifact: "Debian-13-Backend"
+          debian_container: "buildpack-deps:trixie"
+          backend_only: true
+          generate_docs: true
+
+    steps:
+
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Install Qt from Linux Distro
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        apt -y update
+        apt -y install \
+            $BRICKSTORE_QT6_DEB_PACKAGES \
+            ${{ !matrix.config.backend_only && '$BRICKSTORE_GUI_QT6_DEB_PACKAGES' || '' }} \
+            debhelper lsb-release fakeroot build-essential
+
+    - name: Build for Linux (Debian package)
+      run: |
+        /usr/lib/qt6/bin/qt-cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            ${{ matrix.config.backend_only && '-DBACKEND_ONLY=ON' || '' }} \
+            -B build -S .
+        cmake --build build --config RelWithDebInfo --parallel --target deb-package --verbose
+
+    - name: Upload Linux DEB
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ matrix.config.artifact }}
+        path: "build/*.deb"
+        archive: false
+
+    # Generate documentation
+    #################################################
+
+    - name: Generate Documentation
+      if: matrix.config.generate_docs && (github.ref == 'refs/heads/main')
+      run: cmake --build build --target extensions-doc --verbose
+
+    - name: Upload Documentation
+      if: matrix.config.generate_docs && (github.ref == 'refs/heads/main')
+      uses: actions/upload-artifact@v7
+      with:
+        name: Documentation
+        path: "build/doc/html/extensions"
+
+  # Generate the Backend Docker image
+  #################################################
+
+  publish-backend-docker:
+    needs: [ build-debian ]
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download the backend DEB
+      uses: actions/download-artifact@v7
+      with:
+        name: Debian-13-Backend
+        path: docker
+
+    - name: Create and push Docker image
+      env:
+        DOCKER_USER: ${{ secrets.DOCKER_USER }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        mv docker/*.deb docker/brickstore-backend.deb
+        cd docker
+        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+        docker build . --tag "rgriebl/brickstore-backend:$BUILD_NUMBER"
+        docker push "rgriebl/brickstore-backend:$BUILD_NUMBER"
+
+  # PUBLISH
+  #################################################
+
+  # These only consume artifacts, so a failed upload can be re-run on its own
+  # instead of rebuilding. The debug info uploads cannot move here: they scan
+  # Qt's installed libraries, which only exist on the build runner.
+
+  publish-snap:
+    needs: [ build-snap-flatpak ]
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Download the snap
+      uses: actions/download-artifact@v7
+      with:
+        name: Linux-Snap
+        path: snap
+
+    - name: Resolve the snap file name
+      id: find-snap
+      run: echo "path=$(ls snap/*.snap | head -1)" >> $GITHUB_OUTPUT
+
+    - name: Publish to Snapcraft (edge channel)
+      uses: snapcore/action-publish@v1
+      env:
+        SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.UBUNTU_SNAP_LOGIN }}
+      with:
+        snap: ${{ steps.find-snap.outputs.path }}
+        release: edge
+
+  publish-playstore:
+    needs: [ build-android ]
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download the AAB
+      uses: actions/download-artifact@v7
+      with:
+        name: Android-PlayStore
+        path: build
+
+    # the build job used to put this into the environment for the release name
+    - name: Read the version number
+      run: echo VERSION_NUMBER="`cat VERSION_NUMBER`" >> $GITHUB_ENV
 
     - name: Upload Android AAB to the PlayStore
-      if: (matrix.config.os == 'android')
       uses: r0adkll/upload-google-play@v1
       with:
         serviceAccountJsonPlainText: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
@@ -537,193 +689,75 @@ jobs:
         tracks: beta
         releaseName: "${{ env.VERSION_NUMBER }} (build: ${{ env.BUILD_NUMBER }})"
 
-    - name: Upload Android debug info to sentry.io
-      if: (matrix.config.os == 'android')
-      run: |
-        curl -L --output sentry-cli "https://github.com/getsentry/sentry-cli/releases/latest/download/sentry-cli-Linux-x86_64"
-        chmod +x sentry-cli
-        # The .so only carries the symbol table: enable_separate_debug_info() moves the
-        # DWARF into the BrickStore.debug companion, so both are needed.
-        # Qt's own Android libraries are shipped stripped and without companion debug files.
-        ./sentry-cli --auth-token ${{ secrets.SENTRY_AUTH_TOKEN }} upload-dif \
-            --org brickstore --project brickstore \
-            build/libBrickStore_*.so build/BrickStore.debug \
-            build/android_abi_builds/*/libBrickStore_*.so \
-            build/android_abi_builds/*/BrickStore.debug
-      shell: bash
-
-    # Build for macOS
-    #################################################
-
-    - name: Import signing certificate
-      if: (matrix.config.os == 'macos')
-      env:
-        SIGNING_CERTIFICATE_P12_DATA: ${{ secrets.MACOS_SIGNING_CERTIFICATE_P12_DATA }}
-        SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
-      run: |
-        exec .github/scripts/apple-import-certificate.sh
-
-    - name: Import AppStore API key
-      if: (matrix.config.os == 'macos')
-      env:
-        API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-        API_KEY_P8_DATA: ${{ secrets.APPSTORE_API_KEY_P8_DATA }}
-      run: |
-        exec .github/scripts/apple-import-apikey.sh
-
-    - name: Set XCode version for macOS
-      if: (matrix.config.os == 'macos' && matrix.config.xcode)
-      run: |
-        sudo xcode-select -s /Applications/Xcode_${{ matrix.config.xcode }}.app
-      shell: bash
-
-    - name: Build for macOS
-      if: (matrix.config.os == 'macos')
-      run: |
-        ${Qt6_DIR}/bin/qt-cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -D "MACOS_SIGNING_IDENTITY=${{ secrets.MACOS_SIGNING_IDENTITY }}" \
-            ${{ matrix.config.cmake_extra_config }} -B build -S .
-        cmake --build build --config RelWithDebInfo --parallel --target dmg --verbose
-      shell: bash
-
-    - name: Notarize and staple macOS DMG
-      if: (matrix.config.os == 'macos')
-      run: |
-        xcrun notarytool submit --wait build/BrickStore-*.dmg \
-            --issuer "${{ secrets.APPSTORE_API_KEY_ISSUER }}" \
-            --key-id "${{ secrets.APPSTORE_API_KEY_ID }}" \
-            --key "~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APPSTORE_API_KEY_ID }}.p8"
-        xcrun stapler staple -v build/BrickStore-*.dmg
-      shell: bash
-
-    - name: Upload macOS DMG
-      if: (matrix.config.os == 'macos')
-      uses: actions/upload-artifact@v6
+  # altool is macOS only, so this needs a macOS runner even though it only uploads
+  publish-appstore:
+    needs: [ build-ios ]
+    runs-on: macos-26
+    steps:
+    - name: Download the IPA
+      uses: actions/download-artifact@v7
       with:
-        name: ${{ matrix.config.artifact }}
-        path: "build/*.dmg"
+        name: iOS-AppStore
+        path: build
 
-    - name: Upload macOS debug info to sentry.io
-      if: (matrix.config.os == 'macos')
-      run: |
-        brew trust getsentry/tools
-        brew install getsentry/tools/sentry-cli
-        sentry-cli --auth-token ${{ secrets.SENTRY_AUTH_TOKEN }} upload-dif \
-            --org brickstore --project brickstore build/BrickStore.app.dSYM ${Qt6_DIR}/lib/
-
-    # Build for iOS
-    #################################################
-
-    # see here for a description of this setup
-    # https://betterprogramming.pub/deploy-an-ios-app-to-testflight-or-the-app-store-using-github-actions-c4d7082b1430
-
-    - name: Import signing certificate
-      if: (matrix.config.os == 'ios')
-      env:
-        SIGNING_CERTIFICATE_P12_DATA: ${{ secrets.IOS_SIGNING_CERTIFICATE_P12_DATA }}
-        SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}
-      run: |
-        exec .github/scripts/apple-import-certificate.sh
-
-    - name: Import provisioning profile
-      if: (matrix.config.os == 'ios')
-      env:
-        PROVISIONING_PROFILE_DATA: ${{ secrets.IOS_PROVISIONING_PROFILE_DATA }}
-        PROVISIONING_PROFILE_SPECIFIER: ${{ secrets.IOS_PROVISIONING_PROFILE_SPECIFIER }}
-      run: |
-        exec .github/scripts/apple-import-profile.sh
-
-    - name: Import AppStore API key
-      if: (matrix.config.os == 'ios')
-      env:
-        API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-        API_KEY_P8_DATA: ${{ secrets.APPSTORE_API_KEY_P8_DATA }}
-      run: |
-        exec .github/scripts/apple-import-apikey.sh
-
-    - name: Set XCode version for iOS
-      if: (matrix.config.os == 'ios' && matrix.config.xcode)
-      run: |
-        sudo xcode-select -s /Applications/Xcode_${{ matrix.config.xcode }}.app
-      shell: bash
-
-    - name: Build for iOS
-      if: (matrix.config.os == 'ios')
-      run: |
-        ${Qt6_DIR}/bin/qt-cmake -G Xcode -DCMAKE_BUILD_TYPE=Release \
-            -D "QT_HOST_PATH=$(readlink -f $Qt6_DIR/../macos)" \
-            -D "CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=${{ secrets.IOS_DEV_TEAM }}" \
-            -D "CMAKE_XCODE_ATTRIBUTE_PROVISIONING_PROFILE_SPECIFIER=${{ secrets.IOS_PROVISIONING_PROFILE_SPECIFIER }}" \
-            -D "CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=${{ secrets.IOS_CODE_SIGN_IDENTITY }}" \
-            -D "CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_STYLE=Manual" \
-            ${{ matrix.config.cmake_extra_config }} -B build -S .
-        cmake --build build --config Release --parallel --target ipa --verbose
-      shell: bash
-
-    - name: Upload iOS IPA
-      if: (matrix.config.os == 'ios')
-      uses: actions/upload-artifact@v6
+    - name: Set up the AppStore API key
+      uses: $/.github/actions/apple-signing
       with:
-        name: ${{ matrix.config.artifact }}-AppStore
-        path: "build/*.ipa"
+        api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+        api-key-p8-data: ${{ secrets.APPSTORE_API_KEY_P8_DATA }}
 
     - name: Upload iOS IPA to the AppStore
-      if: (matrix.config.os == 'ios')
       run: |
         xcrun altool --upload-app -f build/BrickStore-*.ipa -t ios \
             --apiIssuer "${{ secrets.APPSTORE_API_KEY_ISSUER }}" \
             --apiKey "${{ secrets.APPSTORE_API_KEY_ID }}"
-      shell: bash
 
-    # Generate documentation
-    #################################################
+  publish-docs:
+    if: github.ref == 'refs/heads/main'
+    needs: [ build-debian ]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # pushes to the gh-pages branch
+    steps:
+    - uses: actions/checkout@v6
 
-    - name: Generate Documentation
-      if: (matrix.config.os == 'linux') && matrix.config.debian_container && matrix.config.generate_docs && (github.ref == 'refs/heads/main')
-      run: |
-        sudo docker exec -w /brickstore "debian-build" cmake --build build --target extensions-doc --verbose
+    - name: Download the documentation
+      uses: actions/download-artifact@v6
+      with:
+        name: Documentation
+        path: extensions-doc
 
     - name: Publish Documentation
-      if: matrix.config.generate_docs && (github.ref == 'refs/heads/main')
       uses: peaceiris/actions-gh-pages@v4
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./build/doc/html/extensions
+        publish_dir: ./extensions-doc
         destination_dir: extensions
         enable_jekyll: true
-
-    # Generate the Backend Docker image
-    #################################################
-
-    - name: Create and push Docker image
-      if: (matrix.config.os == 'linux') && matrix.config.generate_docker
-      env:
-        DOCKER_USER: ${{ secrets.DOCKER_USER }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      run: |
-        cp build/*.deb docker/brickstore-backend.deb
-        cd docker
-        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
-        docker build . --tag "rgriebl/brickstore-backend:$BUILD_NUMBER"
-        docker push "$DOCKER_USER/brickstore-backend:$BUILD_NUMBER"
 
   # RELEASE
   #################################################
 
   release:
-    needs: [ build ]
+    needs: [ build-windows, build-appimage, build-snap-flatpak, build-macos,
+             build-android, build-ios, build-debian ]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # creates the GitHub release
     steps:
     - uses: actions/checkout@v6
 
     - name: Download Artifacts to Release
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v6
       with:
         path: 'artifacts'
 
     - name: Rename Artifacts
       run: |
+        # everything left in artifacts/ becomes a release asset, so drop the ones
+        # that are only a handover between jobs
+        rm -rf artifacts/Documentation
         find artifacts -mindepth 2 -type f -print0 | while read -d $'\0' a; do
           d="$(dirname $a)"
           mv "$a" "${d}-$(basename $a)"
@@ -732,10 +766,9 @@ jobs:
         echo "Artifacts after flattening:"
         find artifacts
         echo VERSION_NUMBER="`cat VERSION_NUMBER`" >> $GITHUB_ENV
-      shell: bash
 
     - name: Release
-      uses: docker://antonyurchenko/git-release:latest
+      uses: docker://antonyurchenko/git-release:v6
       # uses: rgriebl/git-release@testing
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -757,4 +790,3 @@ jobs:
       run: |
         sudo DEBIAN_FRONTEND=noninteractive apt -y install snapcraft
         snapcraft promote --yes --from-channel edge --to-channel stable brickstore
-      shell: bash

@@ -1,0 +1,58 @@
+# Copyright (C) 2004-2026 Robert Griebl
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: "Upload debug info to sentry.io"
+description: "Fetch sentry-cli for the platform and run upload-dif"
+
+# The three platforms need three different ways of getting sentry-cli, so the
+# branches below cannot be collapsed. What this does centralize is the token,
+# org/project wiring and the CLI version - all of which are easy to get out of
+# sync when spelled out per job.
+
+inputs:
+  os:
+    description: "windows, macos or linux - selects how sentry-cli is obtained"
+    required: true
+  auth-token:
+    description: "sentry.io auth token"
+    required: true
+  paths:
+    description: >-
+      Files or directories to scan, expanded by the platform's shell - so use
+      that shell's variable syntax (%Qt6_DIR% on Windows, ${Qt6_DIR} elsewhere).
+    required: true
+  org:
+    description: "sentry.io organization"
+    default: 'brickstore'
+  project:
+    description: "sentry.io project"
+    default: 'brickstore'
+
+runs:
+  using: composite
+  steps:
+
+  - name: Upload debug info to sentry.io (Windows)
+    if: inputs.os == 'windows'
+    shell: cmd
+    run: |
+      curl.exe -L --output ..\\sentry-cli.exe "https://github.com/getsentry/sentry-cli/releases/latest/download/sentry-cli-Windows-i686.exe"
+      ..\\sentry-cli.exe --auth-token ${{ inputs.auth-token }} upload-dif --org ${{ inputs.org }} --project ${{ inputs.project }} ${{ inputs.paths }}
+
+  - name: Upload debug info to sentry.io (macOS)
+    if: inputs.os == 'macos'
+    shell: bash
+    run: |
+      brew trust getsentry/tools
+      brew install getsentry/tools/sentry-cli
+      sentry-cli --auth-token ${{ inputs.auth-token }} upload-dif \
+          --org ${{ inputs.org }} --project ${{ inputs.project }} ${{ inputs.paths }}
+
+  - name: Upload debug info to sentry.io (Linux)
+    if: inputs.os == 'linux'
+    shell: bash
+    run: |
+      curl -L --output sentry-cli "https://github.com/getsentry/sentry-cli/releases/latest/download/sentry-cli-Linux-x86_64"
+      chmod +x sentry-cli
+      ./sentry-cli --auth-token ${{ inputs.auth-token }} upload-dif \
+          --org ${{ inputs.org }} --project ${{ inputs.project }} ${{ inputs.paths }}

@@ -1,0 +1,89 @@
+# Copyright (C) 2004-2026 Robert Griebl
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: "Apple signing setup"
+description: "Import the signing certificate, provisioning profile and AppStore API key, and pin XCode"
+
+# see here for a description of this setup
+# https://betterprogramming.pub/deploy-an-ios-app-to-testflight-or-the-app-store-using-github-actions-c4d7082b1430
+
+# The secrets are passed in as env, not interpolated into the run blocks: that keeps
+# them off the rendered command line and out of reach of shell metacharacters.
+
+inputs:
+  certificate-p12-data:
+    description: "base64 encoded .p12 signing certificate - skipped when empty"
+    default: ''
+  certificate-password:
+    description: "password for the .p12 certificate"
+    default: ''
+  api-key-id:
+    description: "AppStore Connect API key id"
+    required: true
+  api-key-p8-data:
+    description: "base64 encoded AppStore Connect .p8 private key"
+    required: true
+  provisioning-profile-data:
+    description: "base64 encoded provisioning profile - iOS only, skipped when empty"
+    default: ''
+  provisioning-profile-specifier:
+    description: "name the provisioning profile is installed under"
+    default: ''
+  xcode-version:
+    description: "XCode version to select - skipped when empty, which uses the runner default"
+    default: ''
+
+runs:
+  using: composite
+  steps:
+  - name: Import signing certificate
+    if: inputs.certificate-p12-data != ''
+    shell: bash
+    env:
+      SIGNING_CERTIFICATE_P12_DATA: ${{ inputs.certificate-p12-data }}
+      SIGNING_CERTIFICATE_PASSWORD: ${{ inputs.certificate-password }}
+    run: |
+      security create-keychain -p "" build.keychain
+      security list-keychains -s build.keychain
+      security default-keychain -s build.keychain
+      security unlock-keychain -p "" build.keychain
+      security set-keychain-settings
+      TMP_SIGCERT=/tmp/sigcert.p12
+      echo "$SIGNING_CERTIFICATE_P12_DATA" | base64 --decode >"${TMP_SIGCERT}"
+      security import "${TMP_SIGCERT}" \
+                      -f pkcs12 \
+                      -k build.keychain \
+                      -P "$SIGNING_CERTIFICATE_PASSWORD" \
+                      -T /usr/bin/codesign
+      rm -f "${TMP_SIGCERT}"
+      security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+
+  - name: Import provisioning profile
+    if: inputs.provisioning-profile-data != ''
+    shell: bash
+    env:
+      PROVISIONING_PROFILE_DATA: ${{ inputs.provisioning-profile-data }}
+      PROVISIONING_PROFILE_SPECIFIER: ${{ inputs.provisioning-profile-specifier }}
+    run: |
+      # iOS Distribution
+      mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+      echo "$PROVISIONING_PROFILE_DATA" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/${PROVISIONING_PROFILE_SPECIFIER}.mobileprovision
+
+      # Apple Distribution
+      mkdir -p ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles
+      echo "$PROVISIONING_PROFILE_DATA" | base64 --decode > ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/${PROVISIONING_PROFILE_SPECIFIER}.mobileprovision
+
+  - name: Import AppStore API key
+    shell: bash
+    env:
+      API_KEY_ID: ${{ inputs.api-key-id }}
+      API_KEY_P8_DATA: ${{ inputs.api-key-p8-data }}
+    run: |
+      mkdir -p ~/.appstoreconnect/private_keys
+      echo "$API_KEY_P8_DATA" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+
+  - name: Set XCode version
+    if: inputs.xcode-version != ''
+    shell: bash
+    run: |
+      sudo xcode-select -s /Applications/Xcode_${{ inputs.xcode-version }}.app

@@ -1,0 +1,119 @@
+# Copyright (C) 2004-2026 Robert Griebl
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: "Install Qt"
+description: "Install Qt via aqtinstall (cached) and export Qt6_DIR to the job environment"
+
+inputs:
+  os:
+    description: "windows, macos, linux, android or ios - selects path style and platform fixups"
+    required: true
+  version:
+    description: "Qt version, e.g. 6.10.3"
+    required: true
+  host:
+    description: "aqt host, e.g. windows, windows_arm64, mac, linux"
+    required: true
+  arch:
+    description: "aqt target architecture, e.g. linux_gcc_64"
+    required: true
+  modules:
+    description: "Qt modules to install"
+    required: true
+  dir:
+    description: "directory name below the version - defaults to the architecture"
+    default: ''
+  target:
+    description: "aqt target"
+    default: 'desktop'
+  host-arch:
+    description: "if set, additionally install a desktop Qt of that architecture as the host Qt"
+    default: ''
+  extra-archs:
+    description: "additional target architectures to install"
+    default: ''
+  tools:
+    description: "aqt tool to install alongside, e.g. tools_opensslv3_src"
+    default: ''
+
+runs:
+  using: composite
+  steps:
+
+  - name: Restore cached Qt from aqtinstall
+    id: restore-cache-qt
+    uses: actions/cache/restore@v6
+    with:
+      path: "${{ runner.workspace }}/Qt/"
+      key: "Qt-${{ inputs.version }}-${{ inputs.host }}-${{ inputs.arch }}-1"
+
+  - name: "Fix Python version"
+    uses: actions/setup-python@v6
+    with:
+      python-version: '3.13'
+
+  - name: Install Qt via aqtinstall
+    if: steps.restore-cache-qt.outputs.cache-hit != 'true'
+    shell: sh
+    run: |
+      # pipx install aqtinstall
+      pipx install git+https://github.com/miurahr/aqtinstall@c84e1470349e5bedbeee977bd62ec495d50d65b6
+      if [ "${{ inputs.host-arch }}" != "" ]; then
+        aqt -c .github/aqt-settings.ini install-qt -O "${{ runner.workspace }}/Qt/" \
+            ${{ inputs.host }} desktop \
+            ${{ inputs.version }} ${{ inputs.host-arch }} \
+            -m ${{ inputs.modules }}
+      fi
+      for arch in ${{ inputs.arch }} ${{ inputs.extra-archs }}; do
+        aqt -c .github/aqt-settings.ini install-qt -O "${{ runner.workspace }}/Qt/" \
+            ${{ inputs.host }} ${{ inputs.target }} \
+            ${{ inputs.version }} $arch \
+            -m ${{ inputs.modules }}
+        if [ "${{ inputs.tools }}" != "" ]; then
+          aqt -c .github/aqt-settings.ini install-tool -O "${{ runner.workspace }}/Qt/" \
+              ${{ inputs.host }} ${{ inputs.target }} \
+              ${{ inputs.tools }}
+        fi
+      done
+
+  - name: Install Qt via aqtinstall (finalize)
+    shell: sh
+    run: |
+      # Set and export Qt6_DIR
+      if [ "${{ inputs.os }}" = "windows" ]; then
+        export Qt6_DIR="${{ runner.workspace }}\\Qt\\${{ inputs.version }}\\${{ inputs.dir || inputs.arch }}"
+      else
+        export Qt6_DIR="${{ runner.workspace }}/Qt/${{ inputs.version }}/${{ inputs.dir || inputs.arch }}"
+      fi
+      echo "Qt6_DIR=$Qt6_DIR" >> $GITHUB_ENV
+
+      # Fix broken Windows / ARM64 setup
+      if [ "${{ inputs.arch }}" = "win64_msvc2022_arm64_cross_compiled" ]; then
+        # Qt < 6.5.0
+        sed -i "s,/Users/qt/work/install/,`echo -E ${Qt6_DIR} | tr '\\' '/'`/../msvc2022_64/," "${Qt6_DIR}/bin/qtpaths.bat"
+        sed -i "s,/Users/qt/work/install/,`echo -E ${Qt6_DIR} | tr '\\' '/'`/../msvc2022_64/," "${Qt6_DIR}/bin/qmake.bat"
+        # Qt >= 6.5.0
+        sed -i "s,\\\Users\\\qt\\\work\\\install\\\,`echo -E ${Qt6_DIR} | sed -e 's,\\\,\\\\\\\,g'`\\\..\\\msvc2022_64\\\," "${Qt6_DIR}/bin/qtpaths.bat"
+        sed -i "s,\\\Users\\\qt\\\work\\\install\\\,`echo -E ${Qt6_DIR} | sed -e 's,\\\,\\\\\\\,g'`\\\..\\\msvc2022_64\\\," "${Qt6_DIR}/bin/qmake.bat"
+        ${Qt6_DIR}/bin/qmake.bat -query
+      fi
+
+      # remove all sqldrivers, except sqlite to avoid missing dependencies when packaging
+      find "$Qt6_DIR/plugins/sqldrivers" -type f -not -ipath "*qsqlite*" -delete
+      find "$Qt6_DIR/lib/cmake/Qt6Sql" -name "*DriverPlugin*" -not -name "*QSQLite*" -delete
+
+      # macOS/Windows: remove the openssl TLS plugin, as this can cause problems
+      case "${{ inputs.os }}" in
+        macos|windows)
+          find "$Qt6_DIR/plugins/tls" -type f -ipath "*qopensslbackend*" -delete
+          find "$Qt6_DIR/lib/cmake/Qt6Network" -name "*QTlsBackendOpenSSL*" -delete
+          ;;
+      esac
+
+  - name: Save cached Qt from aqtinstall
+    id: save-cache-qt
+    if: steps.restore-cache-qt.outputs.cache-hit != 'true'
+    uses: actions/cache/save@v6
+    with:
+      key: ${{ steps.restore-cache-qt.outputs.cache-primary-key }}
+      path: "${{ runner.workspace }}/Qt/"

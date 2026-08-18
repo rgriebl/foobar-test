@@ -504,9 +504,9 @@ add_custom_target("Other-Files" SOURCES
     .gitattributes
     .gitignore
     .github/workflows/build_cmake.yml
-    .github/scripts/apple-import-apikey.sh
-    .github/scripts/apple-import-certificate.sh
-    .github/scripts/apple-import-profile.sh
+    .github/actions/install-qt/action.yml
+    .github/actions/sentry-upload-dif/action.yml
+    .github/actions/apple-signing/action.yml
     .github/FUNDING.yml
     .tag
     CHANGELOG.md
